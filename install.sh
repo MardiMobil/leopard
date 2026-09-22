@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #
-# install.sh - Installs mytool (VirusTotal CLI) globally on Kali/Ubuntu.
+# install.sh - Installs MardiMobil (multi-source OSINT CLI) globally
+#              on Kali/Ubuntu.
 #
 # Usage:
 #   sudo bash install.sh
@@ -10,6 +11,7 @@ set -euo pipefail
 TOOL_NAME="mytool"
 SOURCE_FILE="mytool.py"
 INSTALL_PATH="/usr/local/bin/${TOOL_NAME}"
+REQUIRED_PY_PACKAGES=("requests" "bs4")   # bs4 import name for beautifulsoup4
 
 # --- Must be run as root -----------------------------------------------
 if [[ "${EUID}" -ne 0 ]]; then
@@ -26,7 +28,7 @@ if [[ ! -f "${SRC_PATH}" ]]; then
     exit 1
 fi
 
-echo "[*] Installing dependencies..."
+echo "[*] Checking system dependencies..."
 
 # --- Ensure python3 is available ----------------------------------------
 if ! command -v python3 &>/dev/null; then
@@ -42,16 +44,25 @@ if ! command -v pip3 &>/dev/null; then
     apt-get install -y python3-pip
 fi
 
-# --- Ensure the 'requests' library is installed --------------------------
-if ! python3 -c "import requests" &>/dev/null; then
-    echo "[*] Python 'requests' module not found. Installing..."
+# --- Ensure required Python libraries are installed -----------------------
+echo "[*] Checking Python libraries: requests, beautifulsoup4..."
+
+MISSING=()
+for pkg in "${REQUIRED_PY_PACKAGES[@]}"; do
+    if ! python3 -c "import ${pkg}" &>/dev/null; then
+        MISSING+=("${pkg}")
+    fi
+done
+
+if [[ ${#MISSING[@]} -gt 0 ]]; then
+    echo "[*] Installing missing libraries: requests beautifulsoup4"
     # --break-system-packages handles PEP 668 externally-managed environments
     # (common on recent Kali/Ubuntu); fall back gracefully if unsupported.
-    pip3 install --break-system-packages requests 2>/dev/null || \
-        pip3 install requests || \
-        apt-get install -y python3-requests
+    pip3 install --break-system-packages requests beautifulsoup4 2>/dev/null || \
+        pip3 install requests beautifulsoup4 || \
+        apt-get install -y python3-requests python3-bs4
 else
-    echo "[*] 'requests' module already installed."
+    echo "[*] All required Python libraries already installed."
 fi
 
 # --- Install the tool ------------------------------------------------------
