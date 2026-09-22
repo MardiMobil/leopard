@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # install.sh - Installs MardiMobil (multi-source OSINT CLI) globally
-#              on Kali/Ubuntu.
+#              on Kali/Ubuntu, and sets up a local .env for API keys.
 #
 # Usage:
 #   sudo bash install.sh
@@ -11,7 +11,8 @@ set -euo pipefail
 TOOL_NAME="mytool"
 SOURCE_FILE="mytool.py"
 INSTALL_PATH="/usr/local/bin/${TOOL_NAME}"
-REQUIRED_PY_PACKAGES=("requests" "bs4")   # bs4 import name for beautifulsoup4
+REQUIRED_PY_IMPORTS=("requests" "bs4" "dotenv")   # import names
+PIP_PACKAGES=("requests" "beautifulsoup4" "python-dotenv")
 
 # --- Must be run as root -----------------------------------------------
 if [[ "${EUID}" -ne 0 ]]; then
@@ -45,24 +46,58 @@ if ! command -v pip3 &>/dev/null; then
 fi
 
 # --- Ensure required Python libraries are installed -----------------------
-echo "[*] Checking Python libraries: requests, beautifulsoup4..."
+echo "[*] Checking Python libraries: requests, beautifulsoup4, python-dotenv..."
 
-MISSING=()
-for pkg in "${REQUIRED_PY_PACKAGES[@]}"; do
-    if ! python3 -c "import ${pkg}" &>/dev/null; then
-        MISSING+=("${pkg}")
+MISSING=0
+for imp in "${REQUIRED_PY_IMPORTS[@]}"; do
+    if ! python3 -c "import ${imp}" &>/dev/null; then
+        MISSING=1
+        break
     fi
 done
 
-if [[ ${#MISSING[@]} -gt 0 ]]; then
-    echo "[*] Installing missing libraries: requests beautifulsoup4"
+if [[ "${MISSING}" -eq 1 ]]; then
+    echo "[*] Installing missing libraries: ${PIP_PACKAGES[*]}"
     # --break-system-packages handles PEP 668 externally-managed environments
     # (common on recent Kali/Ubuntu); fall back gracefully if unsupported.
-    pip3 install --break-system-packages requests beautifulsoup4 2>/dev/null || \
-        pip3 install requests beautifulsoup4 || \
-        apt-get install -y python3-requests python3-bs4
+    pip3 install --break-system-packages "${PIP_PACKAGES[@]}" 2>/dev/null || \
+        pip3 install "${PIP_PACKAGES[@]}" || \
+        apt-get install -y python3-requests python3-bs4 python3-dotenv
 else
     echo "[*] All required Python libraries already installed."
+fi
+
+# --- Create the persistent, system-wide .env if it doesn't exist -----------
+# mytool is installed globally to /usr/local/bin, so its config lives in a
+# fixed system location (/etc/mytool/.env) rather than "next to the script" —
+# that way your keys persist and are found no matter where mytool is run from.
+ENV_DIR="/etc/mytool"
+ENV_PATH="${ENV_DIR}/.env"
+
+mkdir -p "${ENV_DIR}"
+
+if [[ ! -f "${ENV_PATH}" ]]; then
+    echo "[*] Creating .env template at ${ENV_PATH}..."
+    cat > "${ENV_PATH}" << 'EOF'
+# Add your API keys below
+VIRUSTOTAL_API_KEY=your_vt_api_key_here
+ABUSEIPDB_API_KEY=your_abuseip_api_key_here
+EOF
+    chmod 600 "${ENV_PATH}"
+    echo "[+] .env created. Edit it with your real API keys before using Mode 1 (API search)."
+else
+    echo "[*] .env already exists at ${ENV_PATH} — leaving it untouched."
+fi
+
+# Also drop a .env template in the repo directory for convenience when
+# running the script locally (e.g. `python3 mytool.py`) without installing.
+LOCAL_ENV_PATH="${SCRIPT_DIR}/.env"
+if [[ ! -f "${LOCAL_ENV_PATH}" ]]; then
+    cp "${ENV_PATH}" "${LOCAL_ENV_PATH}" 2>/dev/null || cat > "${LOCAL_ENV_PATH}" << 'EOF'
+# Add your API keys below
+VIRUSTOTAL_API_KEY=your_vt_api_key_here
+ABUSEIPDB_API_KEY=your_abuseip_api_key_here
+EOF
 fi
 
 # --- Install the tool ------------------------------------------------------
@@ -72,5 +107,6 @@ chmod +x "${INSTALL_PATH}"
 
 echo ""
 echo "[+] Installation complete!"
+echo "[+] Edit your API keys here: ${ENV_PATH}"
 echo "[+] Run the tool from anywhere by typing: ${TOOL_NAME}"
 echo ""

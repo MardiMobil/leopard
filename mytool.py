@@ -3,8 +3,8 @@
 MardiMobil - Multi-source OSINT CLI lookup tool.
 
 Supports:
-  - VirusTotal v3 REST API   (requires API key)
-  - AbuseIPDB v2 REST API    (requires API key)
+  - VirusTotal v3 REST API   (requires API key, loaded from .env)
+  - AbuseIPDB v2 REST API    (requires API key, loaded from .env)
   - bgp.he.net public lookup (scraped, no key required)
 
 Detects IPv4 / Domain / Hash input via regex and queries whichever
@@ -16,6 +16,7 @@ import re
 import sys
 import requests
 from bs4 import BeautifulSoup
+from dotenv import load_dotenv
 
 # ---------------------------------------------------------------------------
 # ANSI colors
@@ -32,12 +33,29 @@ class C:
     RESET = "\033[0m"
 
 
-UA_HEADERS = {
+# Standard, honest browser-style headers. We identify as a normal client
+# and handle blocks/CAPTCHAs gracefully rather than trying to evade them.
+STANDARD_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
         "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
-    )
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
 }
+
+# mytool.py runs from /usr/local/bin after a global install, so we can't
+# rely on "the script's own directory" for a persistent .env (that would be
+# /usr/local/bin, not your project folder, and any edits made in the repo
+# would be silently ignored). Instead we use a single fixed system config
+# location that install.sh also writes to, with a same-directory .env as
+# a fallback for local/dev runs (e.g. `python3 mytool.py` from the repo).
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+SYSTEM_ENV_PATH = "/etc/mytool/.env"
+LOCAL_ENV_PATH = os.path.join(SCRIPT_DIR, ".env")
+
+DEFAULT_VT_PLACEHOLDER = "your_vt_api_key_here"
+DEFAULT_ABUSEIPDB_PLACEHOLDER = "your_abuseip_api_key_here"
 
 # ---------------------------------------------------------------------------
 # Regex patterns
@@ -73,23 +91,34 @@ def clear_screen():
     os.system("cls" if os.name == "nt" else "clear")
 
 
+LEOPARD_ART = r"""
+                       _ __  _
+                      ;'   '',)
+                      /;6 , ;/
+                     (Y)_:., |
+                      `-', :; \
+                        |;  ,.:\
+                       /:.;   ;;)
+                      |:;,.'|  :/
+                     / |:  / ; /
+                    /:;\ `| "//
+                   /_,: | |./,|
+                 _/: \.'|,|/| |
+                /:.,:.|,|"| |:|
+               /:;:|:,/;|:| |'|
+          snd  |',:| \_ \ |_|;\_
+              /;\_ /\_)) \_))\_))
+             (;(________
+"""
+
+
 def print_banner():
     clear_screen()
-    leopard = r"""
-          .------.
-        _/  .  .  \_
-       /  (  @  @  )  \
-      |   \   __   /   |
-      |   /'-.__.-'\   |
-       \  \        /  /
-        `-.________.-'
-         / /|_/\_|\ \
-        / /  ""''""  \ \
-       (_/          \_)
-"""
-    print(f"{C.GREEN}{C.BOLD}{leopard}{C.RESET}")
-    print(f"{C.CYAN}{'=' * 70}{C.RESET}")
-    print(f"{C.MAGENTA}{C.BOLD}      M A R D I   M O B I L   -   OSINT MULTI-SOURCE CLI{C.RESET}")
+    print(f"{C.MAGENTA}{C.BOLD}")
+    print("  M A R D I   M O B I L")
+    print("  OSINT Multi-Source CLI")
+    print(f"{C.RESET}")
+    print(f"{C.GREEN}{LEOPARD_ART}{C.RESET}")
     print(f"{C.CYAN}{'=' * 70}{C.RESET}\n")
 
 
@@ -121,15 +150,61 @@ def prompt_sources() -> set:
         print(f"{C.RED}Invalid selection. Use numbers 1-3, comma-separated.{C.RESET}")
 
 
-def prompt_api_keys(mode: str, sources: set) -> dict:
+# ---------------------------------------------------------------------------
+# .env key loading
+# ---------------------------------------------------------------------------
+def load_api_keys(mode: str, sources: set) -> dict:
+    """
+    Load API keys from the .env file in the script's directory.
+    If a required key is missing or still the placeholder value,
+    warn the user to edit .env and exit gracefully.
+    """
     keys = {}
     if mode != "1":
         return keys
+
+    # Prefer the system-wide .env (used by the globally installed tool);
+    # fall back to a .env next to the script for local/dev runs.
+    if os.path.isfile(SYSTEM_ENV_PATH):
+        env_path = SYSTEM_ENV_PATH
+    elif os.path.isfile(LOCAL_ENV_PATH):
+        env_path = LOCAL_ENV_PATH
+    else:
+        print(f"{C.RED}[!] No .env file found at {SYSTEM_ENV_PATH} or {LOCAL_ENV_PATH}{C.RESET}")
+        print(f"{C.YELLOW}    Run install.sh again, or create one manually with:{C.RESET}")
+        print(f"{C.DIM}      VIRUSTOTAL_API_KEY=...\n      ABUSEIPDB_API_KEY=...{C.RESET}")
+        sys.exit(1)
+
+    # override=True ensures the .env file is always the source of truth,
+    # even if a stale value happens to already be set in the shell environment.
+    load_dotenv(dotenv_path=env_path, override=True)
+
+    missing = []
+
     if "1" in sources:
-        keys["vt"] = input("Please enter your VirusTotal API key: ").strip()
+        vt_key = os.getenv("VIRUSTOTAL_API_KEY", "").strip()
+        if not vt_key or vt_key == DEFAULT_VT_PLACEHOLDER:
+            missing.append("VIRUSTOTAL_API_KEY")
+        else:
+            keys["vt"] = vt_key
+
     if "2" in sources:
-        keys["abuseipdb"] = input("Please enter your AbuseIPDB API key: ").strip()
-    # bgp.he.net never requires a key
+        abuse_key = os.getenv("ABUSEIPDB_API_KEY", "").strip()
+        if not abuse_key or abuse_key == DEFAULT_ABUSEIPDB_PLACEHOLDER:
+            missing.append("ABUSEIPDB_API_KEY")
+        else:
+            keys["abuseipdb"] = abuse_key
+
+    if missing:
+        print(f"{C.RED}[!] The following API key(s) are missing or still set to their "
+              f"default placeholder in .env:{C.RESET}")
+        for m in missing:
+            print(f"    {C.YELLOW}- {m}{C.RESET}")
+        print(f"\n{C.YELLOW}Please edit the .env file at:{C.RESET}")
+        print(f"  {C.CYAN}{env_path}{C.RESET}")
+        print(f"{C.YELLOW}and add your real API key(s), then rerun the tool.{C.RESET}")
+        sys.exit(1)
+
     return keys
 
 
@@ -143,7 +218,7 @@ def vt_lookup_api(api_key: str, input_type: str, value: str):
         "hash": f"https://www.virustotal.com/api/v3/files/{value}",
     }
     url = endpoints[input_type]
-    headers = {**UA_HEADERS, "x-apikey": api_key}
+    headers = {**STANDARD_HEADERS, "x-apikey": api_key}
 
     try:
         resp = requests.get(url, headers=headers, timeout=15)
@@ -213,7 +288,7 @@ def print_vt_summary(input_type: str, value: str, data: dict):
 # ---------------------------------------------------------------------------
 def abuseipdb_lookup_api(api_key: str, value: str):
     url = "https://api.abuseipdb.com/api/v2/check"
-    headers = {**UA_HEADERS, "Key": api_key, "Accept": "application/json"}
+    headers = {**STANDARD_HEADERS, "Key": api_key, "Accept": "application/json"}
     params = {"ipAddress": value, "maxAgeInDays": 90}
 
     try:
@@ -271,7 +346,7 @@ def bgp_he_net_lookup(value: str):
     url = f"https://bgp.he.net/ip/{value}" if IPV4_RE.match(value) else f"https://bgp.he.net/dns/{value}"
 
     try:
-        resp = requests.get(url, headers=UA_HEADERS, timeout=15)
+        resp = requests.get(url, headers=STANDARD_HEADERS, timeout=15)
     except requests.exceptions.ConnectionError:
         return False, "Network error: could not reach bgp.he.net."
     except requests.exceptions.Timeout:
@@ -287,35 +362,117 @@ def bgp_he_net_lookup(value: str):
     return True, resp.text
 
 
+def _extract_table_rows(soup, table_id, max_rows=5):
+    """Grab up to max_rows of readable text from a table by id, if present."""
+    table = soup.find("table", {"id": table_id})
+    if not table:
+        return []
+    rows = table.find_all("tr")[1:max_rows + 1]
+    out = []
+    for row in rows:
+        cols = [c.get_text(strip=True) for c in row.find_all(["td", "th"])]
+        cols = [c for c in cols if c]
+        if cols:
+            out.append(" | ".join(cols))
+    return out
+
+
+def _extract_div_text(soup, div_id, max_lines=6):
+    """Grab readable text lines from a div by id, if present."""
+    div = soup.find("div", {"id": div_id})
+    if not div:
+        return []
+    text = div.get_text(separator="\n")
+    lines = [l.strip() for l in text.splitlines() if l.strip()]
+    return lines[:max_lines]
+
+
+def _extract_asn_hits(soup, max_lines=6):
+    """Fallback: scan all table cells for anything that looks like ASN data."""
+    asn_re = re.compile(r"\bAS\d+\b")
+    hits = []
+    for cell in soup.find_all(["td", "th"]):
+        text = cell.get_text(strip=True)
+        if text and asn_re.search(text):
+            hits.append(text)
+        if len(hits) >= max_lines:
+            break
+    return hits
+
+
+def _extract_main_content_snippet(soup, max_lines=10):
+    """
+    Last-resort fallback: pull raw visible text from the page's main content
+    container (or body) and return a short, readable snippet so the user
+    still gets *something* even if the known selectors have changed.
+    """
+    container = (
+        soup.find("div", {"id": "content"})
+        or soup.find("main")
+        or soup.find("body")
+    )
+    if not container:
+        return []
+
+    # Strip script/style noise before extracting text
+    for tag in container.find_all(["script", "style"]):
+        tag.decompose()
+
+    text = container.get_text(separator="\n")
+    lines = [l.strip() for l in text.splitlines() if l.strip()]
+    # Filter out very short/nav-like fragments to keep the snippet useful
+    lines = [l for l in lines if len(l) > 3]
+    return lines[:max_lines]
+
+
 def print_bgp_summary(html: str, value: str):
     print(f"{C.BLUE}{C.BOLD}[ bgp.he.net ]{C.RESET}")
     try:
         soup = BeautifulSoup(html, "html.parser")
 
-        prefix_table = soup.find("table", {"id": "table_prefixes"})
-        if prefix_table:
-            rows = prefix_table.find_all("tr")[1:4]  # show up to 3 rows
-            if rows:
-                print(f"  {C.CYAN}Announced Prefixes:{C.RESET}")
-                for row in rows:
-                    cols = [c.get_text(strip=True) for c in row.find_all("td")]
-                    if cols:
-                        print(f"    {' | '.join(cols)}")
+        found_anything = False
 
-        whois_pre = soup.find("pre", {"id": "whois"})
-        if whois_pre:
-            text = whois_pre.get_text()
-            snippet_lines = [l for l in text.splitlines() if l.strip()][:6]
-            if snippet_lines:
-                print(f"  {C.CYAN}WHOIS Snippet:{C.RESET}")
-                for line in snippet_lines:
-                    print(f"    {C.DIM}{line.strip()}{C.RESET}")
+        prefixes = _extract_table_rows(soup, "table_prefixes", max_rows=3)
+        if prefixes:
+            found_anything = True
+            print(f"  {C.CYAN}Announced Prefixes:{C.RESET}")
+            for line in prefixes:
+                print(f"    {line}")
 
-        if not prefix_table and not whois_pre:
-            print(f"  {C.YELLOW}No structured data found for '{value}'. "
-                  f"The page layout may have changed.{C.RESET}")
-    except Exception:
-        print(f"  {C.YELLOW}Could not parse bgp.he.net page content.{C.RESET}")
+        whois_lines = _extract_div_text(soup, "whois", max_lines=6)
+        if whois_lines:
+            found_anything = True
+            print(f"  {C.CYAN}WHOIS Snippet:{C.RESET}")
+            for line in whois_lines:
+                print(f"    {C.DIM}{line}{C.RESET}")
+
+        dns_lines = _extract_div_text(soup, "dns", max_lines=6)
+        if dns_lines:
+            found_anything = True
+            print(f"  {C.CYAN}DNS Records:{C.RESET}")
+            for line in dns_lines:
+                print(f"    {C.DIM}{line}{C.RESET}")
+
+        if not found_anything:
+            asn_hits = _extract_asn_hits(soup, max_lines=6)
+            if asn_hits:
+                found_anything = True
+                print(f"  {C.CYAN}Routing / ASN Data:{C.RESET}")
+                for line in asn_hits:
+                    print(f"    {line}")
+
+        if not found_anything:
+            snippet = _extract_main_content_snippet(soup, max_lines=10)
+            if snippet:
+                print(f"  {C.YELLOW}Known selectors didn't match (page layout may have "
+                      f"changed). Showing a raw content snippet instead:{C.RESET}")
+                for line in snippet:
+                    print(f"    {C.DIM}{line}{C.RESET}")
+            else:
+                print(f"  {C.YELLOW}No readable content could be extracted for "
+                      f"'{value}'.{C.RESET}")
+    except Exception as e:
+        print(f"  {C.YELLOW}Could not parse bgp.he.net page content ({e}).{C.RESET}")
     print()
 
 
@@ -373,7 +530,7 @@ def main():
 
     mode = prompt_auth_mode()
     sources = prompt_sources()
-    api_keys = prompt_api_keys(mode, sources)
+    api_keys = load_api_keys(mode, sources)
 
     print(f"\n{C.GREEN}Setup complete. Enter an IP, domain, or file hash to look up.{C.RESET}")
     print(f"{C.GREEN}Type 'exit' or 'quit' to close the tool.{C.RESET}\n")
