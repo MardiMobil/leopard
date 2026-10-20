@@ -1,6 +1,6 @@
 'use strict';
 
-/* MardiMobil GUI. All data from lookups comes from third parties, so it is
+/* vt-search GUI. All data from lookups comes from third parties, so it is
  * only ever inserted with textContent, never as HTML. */
 
 const TOKEN = document.querySelector('meta[name="api-token"]').content;
@@ -52,6 +52,13 @@ function notify(message, isError = false) {
 
 /* ---------------------------------------------------------------- sources */
 
+let userName = '';
+function showName(name) {
+  userName = name || 'OSINT';
+  $('#userName').textContent = userName;
+  document.title = `${userName} · OSINT Lookup`;
+}
+
 function savedSelection() {
   try { return JSON.parse(localStorage.getItem(SELECTION_KEY)); } catch (_) { return null; }
 }
@@ -68,6 +75,7 @@ async function loadSources(extraChecked = []) {
   const data = await (await api('/api/sources')).json();
   sources = data.sources;
   $('#envPath').textContent = data.env_path;
+  showName(data.user_name);
 
   const saved = savedSelection();
   const current = document.querySelector('#sources input') ? selectedSources() : null;
@@ -337,6 +345,7 @@ async function openKeys() {
     return row;
   });
   $('#keyFields').replaceChildren(...fields);
+  $('#nameInput').value = userName;
   $('#keysError').textContent = '';
   $('#keysDialog').showModal();
 }
@@ -347,16 +356,21 @@ async function saveKeys(event) {
   for (const input of $('#keyFields').querySelectorAll('input')) {
     if (input.value.trim()) updates[input.name] = input.value.trim();
   }
-  if (!Object.keys(updates).length) {
+  const name = $('#nameInput').value.trim();
+  const nameChanged = name && name !== userName;
+  if (!Object.keys(updates).length && !nameChanged) {
     $('#keysDialog').close();
     return;
   }
   try {
-    const result = await (await api('/api/keys', { updates })).json();
+    const result = await (await api('/api/keys', { updates, name: nameChanged ? name : '' })).json();
     $('#keysDialog').close();
     await loadSources(result.saved);
     saveSelection();
-    notify(`Saved ${result.saved.length} key${result.saved.length === 1 ? '' : 's'}.`);
+    const parts = [];
+    if (result.saved.length) parts.push(`${result.saved.length} key${result.saved.length === 1 ? '' : 's'}`);
+    if (nameChanged) parts.push('display name');
+    notify(`Saved ${parts.join(' and ')}.`);
   } catch (e) {
     $('#keysError').textContent = e.message;
   }

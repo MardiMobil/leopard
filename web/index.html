@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="api-token" content="{{TOKEN}}">
-  <title>MardiMobil OSINT</title>
+  <title>OSINT Lookup</title>
   <link rel="icon" href="/logo.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/app.css">
 </head>
@@ -13,11 +13,11 @@
     <div class="brand">
       <img class="logo" src="/logo.svg" alt="" width="56" height="56">
       <div>
-        <h1>MARDI <span>MOBIL</span></h1>
+        <h1 id="userName">OSINT</h1>
         <p>OSINT multi-source lookup</p>
       </div>
     </div>
-    <button type="button" id="openKeys" class="ghost">API keys</button>
+    <button type="button" id="openKeys" class="ghost">Settings</button>
   </header>
 
   <main>
@@ -75,9 +75,17 @@
 
   <dialog id="keysDialog">
     <form id="keysForm" method="dialog">
-      <h2>API keys</h2>
-      <p class="muted">Saved to <code id="envPath"></code>. Leave a field empty to keep the current key.
+      <h2>Settings</h2>
+      <p class="muted">Saved to <code id="envPath"></code>. Leave a field empty to keep the current value.
         Keys are never shown here again, only a short hint.</p>
+      <div class="key-fields">
+        <label class="key-row">
+          <span class="key-info"><strong>Display name</strong>
+            <span class="key-state">shown in the header and the CLI banner</span></span>
+          <input type="text" id="nameInput" maxlength="32" autocomplete="off" spellcheck="false">
+        </label>
+      </div>
+      <h3 class="section-title">API keys</h3>
       <div id="keyFields" class="key-fields"></div>
       <p id="keysError" class="error-text" role="alert"></p>
       <div class="row actions">
