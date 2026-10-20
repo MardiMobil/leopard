@@ -1,9 +1,9 @@
-# vt-search
+# leopard
 
 Check an IP address, domain or file hash against several threat-intelligence sources at once.
 You get each source's verdict plus one **0–100% malicious score**.
 
-- **Two interfaces:** terminal (`mytool`) and browser GUI (`mytool --gui`). Both run the same code, so results are identical.
+- **Two interfaces:** terminal (`leopard`) and browser GUI (`leopard --gui`). Both run the same code, so results are identical.
 - Runs on **Windows and Linux**.
 - Bulk lookups, CSV/JSON export, defanged input (`1.2.3[.]4`, `hxxp://evil[.]com`) and IPv6.
 - Personal: the banner, prompt and GUI header show **your own name** (see [Your display name](#your-display-name)).
@@ -56,41 +56,41 @@ So you can use OTX, Shodan and bgp.he.net without any keys at all.
 2. Get the repo: on GitHub click the green **Code** → **Download ZIP** and extract it.
    Or, with git:
    ```powershell
-   git clone https://github.com/MardiMobil/vt-search.git
+   git clone https://github.com/MardiMobil/leopard.git
    ```
 3. Go into the folder and run the installer (no admin rights needed):
    ```powershell
-   cd vt-search
+   cd leopard
    powershell -ExecutionPolicy Bypass -File .\install.ps1
    ```
 4. **Open a new terminal window** (the old one won't know the new command) and check:
    ```powershell
-   mytool --list-sources
+   leopard --list-sources
    ```
 
 What the installer does:
-- copies the tool to `%LOCALAPPDATA%\Programs\mytool` (with its own Python environment);
-- adds the `mytool` command to your PATH;
-- creates `%APPDATA%\mytool\.env` for API keys (readable only by your account).
+- copies the tool to `%LOCALAPPDATA%\Programs\leopard` (with its own Python environment);
+- adds the `leopard` command to your PATH;
+- creates `%APPDATA%\leopard\.env` for API keys (readable only by your account).
 
 ### Linux (Kali, Ubuntu, Debian)
 
 ```bash
-git clone https://github.com/MardiMobil/vt-search.git
-cd vt-search
+git clone https://github.com/MardiMobil/leopard.git
+cd leopard
 sudo bash install.sh
-mytool --list-sources
+leopard --list-sources
 ```
-Keys are stored in `/etc/mytool/.env` (readable only by root).
+Keys are stored in `/etc/leopard/.env` (readable only by root).
 
 ### Run without installing (any OS)
 
 ```bash
 pip install -r requirements.txt
-python mytool.py            # terminal
-python mytool.py --gui      # browser
+python leopard.py            # terminal
+python leopard.py --gui      # browser
 ```
-In this mode keys are read from a `.env` file next to `mytool.py`.
+In this mode keys are read from a `.env` file next to `leopard.py`.
 
 ---
 
@@ -107,7 +107,7 @@ In this mode keys are read from a `.env` file next to `mytool.py`.
 
 ### 4 ways to add a key
 
-**a) On every start (easiest).** When `mytool` starts it asks:
+**a) On every start (easiest).** When `leopard` starts it asks:
 ```
 Do you want to add or change any API keys? [Y/n]:
 ```
@@ -118,14 +118,14 @@ Do you want to add or change any API keys? [Y/n]:
 
 **b) Key menu only:**
 ```bash
-mytool --keys
+leopard --keys
 ```
 
-**c) In the browser:** `mytool --gui` → **Settings** (top right) → enter the key → **Save**.
+**c) In the browser:** `leopard --gui` → **Settings** (top right) → enter the key → **Save**.
 
 **d) Edit the file by hand:**
-- Windows: `notepad $env:APPDATA\mytool\.env`
-- Linux: `sudo nano /etc/mytool/.env`
+- Windows: `notepad $env:APPDATA\leopard\.env`
+- Linux: `sudo nano /etc/leopard/.env`
 
 ```
 VIRUSTOTAL_API_KEY=your_key
@@ -135,7 +135,7 @@ URLHAUS_AUTH_KEY=your_key
 ```
 No quotes needed, and no spaces around `=`.
 
-Check with `mytool --list-sources`: sources with a key show **key OK**.
+Check with `leopard --list-sources`: sources with a key show **key OK**.
 
 ### Your display name
 
@@ -143,9 +143,9 @@ The CLI banner (`A L I   M A M M A D O V`), the prompt (`Ali Mammadov >`), the g
 message and the GUI header all show your name. By default it is your computer login name.
 Change it any time:
 
-- CLI: `mytool --name "Ali Mammadov"`
+- CLI: `leopard --name "Ali Mammadov"`
 - GUI: **Settings** → **Display name** → **Save**
-- or add `MYTOOL_NAME=Ali Mammadov` to your `.env`
+- or add `LEOPARD_NAME=Ali Mammadov` to your `.env`
 
 Allowed: 1–32 letters, digits, spaces, `.`, `_` and `-`.
 
@@ -154,7 +154,7 @@ Allowed: 1–32 letters, digits, spaces, `.`, `_` and `-`.
 ## 4. Browser GUI
 
 ```bash
-mytool --gui
+leopard --gui
 ```
 Your browser opens automatically (`http://127.0.0.1:8765`). Keep the terminal window open, the server runs there.
 Press **Ctrl+C** in the terminal to stop it.
@@ -178,7 +178,7 @@ A free VirusTotal key allows 4 requests per minute. For many targets, set
 
 ### Interactive mode
 ```bash
-mytool
+leopard
 ```
 1. Answer the API key question (see above).
 2. Choose sources, e.g. `1,2,6`, or press **Enter** for all.
@@ -190,15 +190,15 @@ mytool
 
 | Goal | Command |
 |---|---|
-| One target | `mytool 8.8.8.8` |
-| Several targets | `mytool 8.8.8.8 google.com 44d88612fea8a8f36de82e1278abb02f` |
-| Defanged input | `mytool "hxxp://evil[.]com/login"` |
-| Only some sources | `mytool 1.1.1.1 -s vt,abuseipdb` (or by number: `-s 1,2`) |
-| Bulk lookup from a file | `mytool -f iocs.txt` |
-| Save results for Excel | `mytool -f iocs.txt -o report.csv` |
-| Save results as JSON | `mytool -f iocs.txt -o report.json` |
-| Respect VirusTotal limits | `mytool -f iocs.txt --delay 15` |
-| Skip the key question | `mytool 8.8.8.8 --skip-keys` |
+| One target | `leopard 8.8.8.8` |
+| Several targets | `leopard 8.8.8.8 google.com 44d88612fea8a8f36de82e1278abb02f` |
+| Defanged input | `leopard "hxxp://evil[.]com/login"` |
+| Only some sources | `leopard 1.1.1.1 -s vt,abuseipdb` (or by number: `-s 1,2`) |
+| Bulk lookup from a file | `leopard -f iocs.txt` |
+| Save results for Excel | `leopard -f iocs.txt -o report.csv` |
+| Save results as JSON | `leopard -f iocs.txt -o report.json` |
+| Respect VirusTotal limits | `leopard -f iocs.txt --delay 15` |
+| Skip the key question | `leopard 8.8.8.8 --skip-keys` |
 
 **Bulk file** (`iocs.txt`): one target per line; lines starting with `#` are ignored.
 ```
@@ -259,16 +259,16 @@ One strong source is enough for a high score, and agreeing sources push it highe
 
 | Problem | Fix |
 |---------|-----|
-| `mytool : The term 'mytool' is not recognized` | Open a **new** terminal after installing. |
+| `leopard : The term 'leopard' is not recognized` | Open a **new** terminal after installing. |
 | Typing `python` opens the Microsoft Store | Use `py` instead, or install with `winget install Python.Python.3.13`. |
 | `install.ps1 cannot be loaded because running scripts is disabled` | Run exactly: `powershell -ExecutionPolicy Bypass -File .\install.ps1` |
-| `rejected the API key (HTTP 401/403)` | The key is wrong or expired. Re-enter it with `mytool --keys`. |
+| `rejected the API key (HTTP 401/403)` | The key is wrong or expired. Re-enter it with `leopard --keys`. |
 | `rate limit exceeded` | The free quota is used up. Wait a bit, and use `--delay 15` for bulk lookups. |
 | `Network error: could not reach Shodan InternetDB` | Your network (firewall/ISP) blocks Shodan. The other sources still work. |
 | `request timed out` (OTX) | OTX is slow for popular indicators. Try again. |
 | GUI: `Port 8765 is busy` | Not a problem; the tool picks a free port and prints the address in the terminal. |
 | GUI: `Forbidden. Reload the page.` | The server was restarted. Reload the page (F5). |
-| Linux: `Could not write /etc/mytool/.env` | Run `sudo mytool --keys`. |
+| Linux: `Could not write /etc/leopard/.env` | Run `sudo leopard --keys`. |
 | The key question every start is annoying | Answer `n`, or add `--skip-keys`. |
 
 ---
@@ -285,14 +285,14 @@ Your keys (`.env`) are left untouched.
 ### Uninstall
 **Windows** (PowerShell):
 ```powershell
-Remove-Item -Recurse "$env:LOCALAPPDATA\Programs\mytool", "$env:APPDATA\mytool"
+Remove-Item -Recurse "$env:LOCALAPPDATA\Programs\leopard", "$env:APPDATA\leopard"
 ```
-Then remove the `...\Programs\mytool` entry from your user `Path` under
+Then remove the `...\Programs\leopard` entry from your user `Path` under
 **Settings → System → About → Advanced system settings → Environment Variables**.
 
 **Linux:**
 ```bash
-sudo rm -rf /usr/local/lib/mytool /usr/local/bin/mytool /etc/mytool
+sudo rm -rf /usr/local/lib/leopard /usr/local/bin/leopard /etc/leopard
 ```
 
 ---
@@ -315,7 +315,7 @@ sudo rm -rf /usr/local/lib/mytool /usr/local/bin/mytool /etc/mytool
 ## 10. All options
 
 ```
-mytool [targets ...] [options]
+leopard [targets ...] [options]
 
   -f, --file FILE       read targets from a file
   -s, --sources LIST    sources: vt,abuseipdb,otx,urlhaus,shodan,bgp or all (default)
@@ -332,5 +332,5 @@ mytool [targets ...] [options]
   -h, --help            help
 ```
 
-Key file lookup order: `MYTOOL_ENV` environment variable → system file
-(`/etc/mytool/.env` or `%APPDATA%\mytool\.env`) → `.env` next to `mytool.py`.
+Key file lookup order: `LEOPARD_ENV` environment variable → system file
+(`/etc/leopard/.env` or `%APPDATA%\leopard\.env`) → `.env` next to `leopard.py`.

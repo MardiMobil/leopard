@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-vt-search - Multi-source OSINT CLI lookup tool.
+leopard - Multi-source OSINT CLI lookup tool.
 
 The banner, prompt and GUI greet each user by their own display name:
-the login name by default, or whatever `mytool --name "..."` saved.
+the login name by default, or whatever `leopard --name "..."` saved.
 
 Supports:
   - VirusTotal v3 REST API      (API key)   IPv4 / IPv6 / domain / hash
@@ -14,10 +14,10 @@ Supports:
   - bgp.he.net public lookup    (scraped)   IPv4 / IPv6 / domain
 
 Usage:
-  mytool                              interactive menu
-  mytool 8.8.8.8 example.com          look targets up directly
-  mytool -f targets.txt -o out.csv    bulk lookup, save results
-  mytool --list-sources               show sources and which keys are set
+  leopard                              interactive menu
+  leopard 8.8.8.8 example.com          look targets up directly
+  leopard -f targets.txt -o out.csv    bulk lookup, save results
+  leopard --list-sources               show sources and which keys are set
 
 Detects the input type (defanged input such as 1.2.3[.]4 or hxxp://... is OK)
 and queries the selected sources in parallel. Keyed sources without a key are
@@ -95,18 +95,18 @@ STANDARD_HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 
-# After a global install mytool runs from /usr/local/lib/mytool (Linux) or
-# %LOCALAPPDATA%\Programs\mytool (Windows), so "the script's own directory"
+# After a global install leopard runs from /usr/local/lib/leopard (Linux) or
+# %LOCALAPPDATA%\Programs\leopard (Windows), so "the script's own directory"
 # is not a good home for API keys. We use one fixed per-system config file
 # that the installers also write to, with a same-directory .env as a fallback
-# for local/dev runs (e.g. `python mytool.py` from the repo). MYTOOL_ENV
+# for local/dev runs (e.g. `python leopard.py` from the repo). LEOPARD_ENV
 # overrides both.
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if os.name == "nt":
     SYSTEM_ENV_PATH = os.path.join(
-        os.getenv("APPDATA") or os.path.expanduser("~"), "mytool", ".env")
+        os.getenv("APPDATA") or os.path.expanduser("~"), "leopard", ".env")
 else:
-    SYSTEM_ENV_PATH = "/etc/mytool/.env"
+    SYSTEM_ENV_PATH = "/etc/leopard/.env"
 LOCAL_ENV_PATH = os.path.join(SCRIPT_DIR, ".env")
 
 
@@ -184,8 +184,8 @@ def _is_placeholder(value: str) -> bool:
 
 
 def find_env_file() -> str | None:
-    """First existing .env of: $MYTOOL_ENV, the system config file, one next to the script."""
-    return next((p for p in (os.getenv("MYTOOL_ENV"), SYSTEM_ENV_PATH, LOCAL_ENV_PATH)
+    """First existing .env of: $LEOPARD_ENV, the system config file, one next to the script."""
+    return next((p for p in (os.getenv("LEOPARD_ENV"), SYSTEM_ENV_PATH, LOCAL_ENV_PATH)
                  if p and os.path.isfile(p)), None)
 
 
@@ -209,7 +209,7 @@ def load_api_keys() -> tuple[dict, str | None]:
 
 # Display name shown in the banner, prompt and GUI. Letters (any language),
 # digits, spaces, '.', '_' and '-' only: it is printed straight to terminals.
-NAME_ENV = "MYTOOL_NAME"
+NAME_ENV = "LEOPARD_NAME"
 NAME_RE = re.compile(r"^[\w .-]{1,32}$")
 
 
@@ -312,7 +312,7 @@ def edit_keys(keys: dict, env_path: str | None) -> tuple[dict, str | None]:
         except OSError as e:
             print(f"{C.RED}[!] Could not write {path}: {e.strerror}{C.RESET}")
             if os.name != "nt":
-                print(f"{C.YELLOW}    Run with sudo, or point MYTOOL_ENV to a file you own.{C.RESET}")
+                print(f"{C.YELLOW}    Run with sudo, or point LEOPARD_ENV to a file you own.{C.RESET}")
             continue
         keys[src.id] = value
         changed = True
@@ -1107,19 +1107,19 @@ def read_targets(path: str) -> list[str]:
 
 def parse_args(argv=None):
     p = argparse.ArgumentParser(
-        prog="mytool",
-        description="vt-search - multi-source OSINT lookup for IPs, domains and file hashes.",
+        prog="leopard",
+        description="leopard - multi-source OSINT lookup for IPs, domains and file hashes.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "examples:\n"
-            "  mytool                               interactive menu\n"
-            "  mytool 8.8.8.8 example.com           look up targets\n"
-            "  mytool 1.2.3[.]4 -s vt,abuseipdb     only some sources\n"
-            "  mytool -f iocs.txt -o report.csv     bulk lookup, save as CSV\n"
-            "  mytool -f iocs.txt --delay 15        respect free VirusTotal limits (4/min)\n"
-            "  mytool --keys                        add or change API keys\n"
-            "  mytool --gui                         open the browser interface\n"
-            "  mytool --name \"Your Name\"            set the name shown in the banner and GUI\n"
+            "  leopard                               interactive menu\n"
+            "  leopard 8.8.8.8 example.com           look up targets\n"
+            "  leopard 1.2.3[.]4 -s vt,abuseipdb     only some sources\n"
+            "  leopard -f iocs.txt -o report.csv     bulk lookup, save as CSV\n"
+            "  leopard -f iocs.txt --delay 15        respect free VirusTotal limits (4/min)\n"
+            "  leopard --keys                        add or change API keys\n"
+            "  leopard --gui                         open the browser interface\n"
+            "  leopard --name \"Your Name\"            set the name shown in the banner and GUI\n"
             "\nOn start you are asked whether to change API keys (Enter = yes);\n"
             "--skip-keys skips that question. It is never asked when input is piped.\n"
             "\nsources: " + ", ".join(s.id for s in SOURCES)

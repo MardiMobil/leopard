@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-gui.py - Browser interface for vt-search.
+gui.py - Browser interface for leopard.
 
 Starts a small web server on 127.0.0.1 (never reachable from the network) and
 opens it in your browser. Every lookup, score and export goes through
-mytool.py, so the CLI and the GUI always give the same results.
+leopard.py, so the CLI and the GUI always give the same results.
 
 Usage:
-  mytool --gui                 (or: python gui.py)
-  mytool --gui --port 9000 --no-browser
+  leopard --gui                 (or: python gui.py)
+  leopard --gui --port 9000 --no-browser
 
 Security:
   * Binds to 127.0.0.1 only, and refuses requests whose Host header isn't
@@ -31,7 +31,7 @@ import threading
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-import mytool as core
+import leopard as core
 
 WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
 MAX_BODY = 5 * 1024 * 1024  # bytes; exports of large bulk runs stay well below this
@@ -64,7 +64,7 @@ def make_handler(token: str, port: int):
     allowed_hosts = {f"127.0.0.1:{port}", f"localhost:{port}"}
 
     class Handler(BaseHTTPRequestHandler):
-        server_version = "vt-search"
+        server_version = "leopard"
         sys_version = ""
 
         def log_message(self, *_):  # keep the terminal quiet
@@ -253,7 +253,7 @@ def serve(port: int = 8765, open_browser: bool = True) -> int:
 
 
 def main(argv=None) -> int:
-    p = argparse.ArgumentParser(prog="mytool --gui", description="vt-search browser interface.")
+    p = argparse.ArgumentParser(prog="leopard --gui", description="leopard browser interface.")
     p.add_argument("--port", type=int, default=8765, help="port to listen on (default: 8765)")
     p.add_argument("--no-browser", action="store_true", help="don't open a browser window")
     args = p.parse_args(argv)

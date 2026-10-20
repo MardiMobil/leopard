@@ -1,27 +1,32 @@
 <#
-install.ps1 - Installs vt-search (multi-source OSINT CLI) for the current
-              Windows user and sets up a private .env for API keys.
+install.ps1 - Installs leopard (multi-source OSINT CLI + browser GUI) for the
+              current Windows user and sets up a private .env for API keys.
 
 Usage (from the repo folder, no admin rights needed):
     powershell -ExecutionPolicy Bypass -File .\install.ps1
 
-Installs to  %LOCALAPPDATA%\Programs\mytool  (own Python venv + mytool.cmd)
-Keys live in %APPDATA%\mytool\.env           (readable only by you)
+Installs to  %LOCALAPPDATA%\Programs\leopard  (own Python venv + leopard.exe)
+Keys live in %APPDATA%\leopard\.env           (readable only by you)
+Running it again updates the tool and keeps your keys.
 #>
 $ErrorActionPreference = 'Stop'
 
-$ToolName   = 'mytool'
+$ToolName   = 'leopard'
 $RepoDir    = $PSScriptRoot
-$SrcPath    = Join-Path $RepoDir 'mytool.py'
+$SrcPath    = Join-Path $RepoDir 'leopard.py'
 $ReqPath    = Join-Path $RepoDir 'requirements.txt'
 $InstallDir = Join-Path $env:LOCALAPPDATA "Programs\$ToolName"
 $VenvPython = Join-Path $InstallDir 'venv\Scripts\python.exe'
 $EnvDir     = Join-Path $env:APPDATA $ToolName
 $EnvPath    = Join-Path $EnvDir '.env'
 
+# The tool used to be called 'mytool'; its files are migrated below.
+$OldInstallDir = Join-Path $env:LOCALAPPDATA 'Programs\mytool'
+$OldEnvPath    = Join-Path $env:APPDATA 'mytool\.env'
+
 function Fail($msg) { Write-Host "[!] $msg" -ForegroundColor Red; exit 1 }
 
-if (-not (Test-Path $SrcPath)) { Fail "Could not find mytool.py in $RepoDir" }
+if (-not (Test-Path $SrcPath)) { Fail "Could not find leopard.py in $RepoDir" }
 
 # --- Find Python 3.10+ ------------------------------------------------------
 # 'py' (the official launcher) first: 'python' may be the Microsoft Store stub.
@@ -49,6 +54,14 @@ if ($LASTEXITCODE -ne 0) { Fail "pip install failed." }
 
 # --- Persistent per-user .env --------------------------------------------------
 New-Item -ItemType Directory -Force $EnvDir | Out-Null
+if ((Test-Path $OldEnvPath) -and -not (Test-Path $EnvPath)) {
+    # Move (not copy) so the keys don't stay behind in the old folder.
+    Move-Item $OldEnvPath $EnvPath
+    (Get-Content $EnvPath) -replace '^(\s*)MYTOOL_', '$1LEOPARD_' | Set-Content $EnvPath -Encoding utf8
+    # Only succeeds if the old folder is now empty; anything else stays put.
+    Remove-Item (Split-Path $OldEnvPath) -ErrorAction SilentlyContinue
+    Write-Host "[*] Moved your API keys from $OldEnvPath to $EnvPath."
+}
 if (-not (Test-Path $EnvPath)) {
     Write-Host "[*] Creating .env template at $EnvPath..."
     @(
@@ -59,28 +72,69 @@ if (-not (Test-Path $EnvPath)) {
         'OTX_API_KEY=your_otx_api_key_here'
         'URLHAUS_AUTH_KEY=your_urlhaus_auth_key_here'
     ) | Set-Content -Path $EnvPath -Encoding ascii
-    # Owner-only access, the Windows equivalent of chmod 600.
-    icacls $EnvPath /inheritance:r /grant:r "$($env:USERDOMAIN)\$($env:USERNAME):(R,W)" | Out-Null
     Write-Host "[+] .env created. Edit it with your real API keys." -ForegroundColor Green
 } else {
-    Write-Host "[*] .env already exists at $EnvPath - leaving it untouched."
+    Write-Host "[*] .env already exists at $EnvPath - keeping your keys."
 }
+# Owner-only access, the Windows equivalent of chmod 600.
+icacls $EnvPath /inheritance:r /grant:r "$($env:USERDOMAIN)\$($env:USERNAME):(R,W)" | Out-Null
 
-# --- Install the tool + a 'mytool' command on PATH ----------------------------
-Write-Host "[*] Copying mytool.py, gui.py and web\ to $InstallDir..."
-Copy-Item $SrcPath (Join-Path $InstallDir 'mytool.py') -Force
+# --- Install the tool -----------------------------------------------------------
+Write-Host "[*] Copying leopard.py, gui.py and web\ to $InstallDir..."
+Copy-Item $SrcPath (Join-Path $InstallDir 'leopard.py') -Force
 Copy-Item (Join-Path $RepoDir 'gui.py') (Join-Path $InstallDir 'gui.py') -Force
 New-Item -ItemType Directory -Force (Join-Path $InstallDir 'web') | Out-Null
 Copy-Item (Join-Path $RepoDir 'web\*') (Join-Path $InstallDir 'web') -Recurse -Force
-@(
-    '@echo off'
-    "`"$VenvPython`" `"$(Join-Path $InstallDir 'mytool.py')`" %*"
-) | Set-Content -Path (Join-Path $InstallDir 'mytool.cmd') -Encoding ascii
 
+# --- 'leopard' command ----------------------------------------------------------
+# A real leopard.exe (pip's console-script launcher) instead of a .cmd file:
+# with a batch file, Windows asks "Terminate batch job (Y/N)?" after Ctrl+C.
+Write-Host "[*] Building the leopard.exe launcher..."
+$LauncherDir = Join-Path $InstallDir 'launcher'
+New-Item -ItemType Directory -Force $LauncherDir | Out-Null
+@"
+import runpy
+import sys
+
+def main():
+    sys.path.insert(0, r"$InstallDir")
+    sys.argv[0] = r"$(Join-Path $InstallDir 'leopard.py')"
+    runpy.run_path(sys.argv[0], run_name="__main__")
+"@ | Set-Content (Join-Path $LauncherDir 'leopard_launcher.py') -Encoding ascii
+@'
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "leopard-launcher"
+version = "1.0"
+
+[project.scripts]
+leopard = "leopard_launcher:main"
+
+[tool.setuptools]
+py-modules = ["leopard_launcher"]
+'@ | Set-Content (Join-Path $LauncherDir 'pyproject.toml') -Encoding ascii
+& $VenvPython -m pip install --disable-pip-version-check -q --force-reinstall --no-deps $LauncherDir
+if ($LASTEXITCODE -ne 0) { Fail "Could not build the leopard.exe launcher." }
+# Copy only the exe: putting venv\Scripts on PATH would also expose its python.exe.
+Copy-Item (Join-Path $InstallDir 'venv\Scripts\leopard.exe') (Join-Path $InstallDir 'leopard.exe') -Force
+Remove-Item (Join-Path $InstallDir 'leopard.cmd') -ErrorAction SilentlyContinue
+
+# --- PATH: add the new folder, drop the old 'mytool' one -------------------------
 $UserPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-if (-not (($UserPath -split ';') -contains $InstallDir)) {
-    [Environment]::SetEnvironmentVariable('Path', (@($UserPath, $InstallDir) -ne '' -join ';'), 'User')
+$Parts = @(($UserPath -split ';') | Where-Object { $_ -and $_ -ne $OldInstallDir })
+if (-not ($Parts -contains $InstallDir)) {
+    $Parts += $InstallDir
     Write-Host "[*] Added $InstallDir to your PATH (open a new terminal to use it)."
+}
+$NewPath = $Parts -join ';'
+if ($NewPath -ne $UserPath) { [Environment]::SetEnvironmentVariable('Path', $NewPath, 'User') }
+
+if (Test-Path $OldInstallDir) {
+    Remove-Item -Recurse -Force $OldInstallDir
+    Write-Host "[*] Removed the old 'mytool' installation."
 }
 
 Write-Host ""

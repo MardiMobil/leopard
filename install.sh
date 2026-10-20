@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# install.sh - Installs vt-search (multi-source OSINT CLI) globally
+# install.sh - Installs leopard (multi-source OSINT CLI) globally
 #              on Kali/Ubuntu, and sets up a local .env for API keys.
 #              On Windows use install.ps1 instead.
 #
@@ -9,10 +9,10 @@
 #
 set -euo pipefail
 
-TOOL_NAME="mytool"
-SOURCE_FILE="mytool.py"
+TOOL_NAME="leopard"
+SOURCE_FILE="leopard.py"
 # The code (CLI, GUI and its web/ assets) lives in LIB_DIR; INSTALL_PATH is a
-# small launcher so `mytool` and `mytool --gui` work from anywhere.
+# small launcher so `leopard` and `leopard --gui` work from anywhere.
 LIB_DIR="/usr/local/lib/${TOOL_NAME}"
 INSTALL_PATH="/usr/local/bin/${TOOL_NAME}"
 REQUIRED_PY_IMPORTS=("requests" "bs4" "dotenv")   # import names
@@ -72,13 +72,25 @@ else
 fi
 
 # --- Create the persistent, system-wide .env if it doesn't exist -----------
-# mytool is installed globally to /usr/local/bin, so its config lives in a
-# fixed system location (/etc/mytool/.env) rather than "next to the script" —
-# that way your keys persist and are found no matter where mytool is run from.
-ENV_DIR="/etc/mytool"
+# leopard is installed globally to /usr/local/bin, so its config lives in a
+# fixed system location (/etc/leopard/.env) rather than "next to the script" —
+# that way your keys persist and are found no matter where leopard is run from.
+ENV_DIR="/etc/leopard"
 ENV_PATH="${ENV_DIR}/.env"
 
 mkdir -p "${ENV_DIR}"
+
+# The tool used to be called 'mytool': move its keys and remove the old install.
+OLD_ENV_PATH="/etc/mytool/.env"
+if [[ -f "${OLD_ENV_PATH}" && ! -f "${ENV_PATH}" ]]; then
+    mv "${OLD_ENV_PATH}" "${ENV_PATH}"
+    sed -i 's/^\([[:space:]]*\)MYTOOL_/\1LEOPARD_/' "${ENV_PATH}"
+    chmod 600 "${ENV_PATH}"
+    rmdir /etc/mytool 2>/dev/null || true
+    echo "[*] Moved your API keys from ${OLD_ENV_PATH} to ${ENV_PATH}."
+fi
+rm -rf /usr/local/lib/mytool
+rm -f /usr/local/bin/mytool
 
 if [[ ! -f "${ENV_PATH}" ]]; then
     echo "[*] Creating .env template at ${ENV_PATH}..."
@@ -91,13 +103,13 @@ OTX_API_KEY=your_otx_api_key_here
 URLHAUS_AUTH_KEY=your_urlhaus_auth_key_here
 EOF
     chmod 600 "${ENV_PATH}"
-    echo "[+] .env created. Edit it with your real API keys before using Mode 1 (API search)."
+    echo "[+] .env created. Edit it with your real API keys (or run: sudo leopard --keys)."
 else
     echo "[*] .env already exists at ${ENV_PATH} — leaving it untouched."
 fi
 
 # Also drop a .env template in the repo directory for convenience when
-# running the script locally (e.g. `python3 mytool.py`) without installing.
+# running the script locally (e.g. `python3 leopard.py`) without installing.
 LOCAL_ENV_PATH="${SCRIPT_DIR}/.env"
 if [[ ! -f "${LOCAL_ENV_PATH}" ]]; then
     cp "${ENV_PATH}" "${LOCAL_ENV_PATH}" 2>/dev/null || cat > "${LOCAL_ENV_PATH}" << 'EOF'
@@ -112,16 +124,16 @@ EOF
 fi
 
 # --- Install the tool ------------------------------------------------------
-echo "[*] Copying mytool.py, gui.py and web/ to ${LIB_DIR}..."
+echo "[*] Copying leopard.py, gui.py and web/ to ${LIB_DIR}..."
 mkdir -p "${LIB_DIR}/web"
 cp "${SRC_PATH}" "${SCRIPT_DIR}/gui.py" "${LIB_DIR}/"
 cp -r "${SCRIPT_DIR}/web/." "${LIB_DIR}/web/"
 chmod -R a+rX "${LIB_DIR}"
 
-# Replace an old single-file install (a copy of mytool.py) with the launcher.
+# Small launcher so `leopard` works from anywhere.
 cat > "${INSTALL_PATH}" << EOF
 #!/bin/sh
-exec python3 "${LIB_DIR}/mytool.py" "\$@"
+exec python3 "${LIB_DIR}/leopard.py" "\$@"
 EOF
 chmod 755 "${INSTALL_PATH}"
 

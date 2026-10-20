@@ -1,6 +1,6 @@
 'use strict';
 
-/* vt-search GUI. All data from lookups comes from third parties, so it is
+/* leopard GUI. All data from lookups comes from third parties, so it is
  * only ever inserted with textContent, never as HTML. */
 
 const TOKEN = document.querySelector('meta[name="api-token"]').content;
