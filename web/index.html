@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="api-token" content="{{TOKEN}}">
+  <title>MardiMobil OSINT</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">MM</span>
+      <div>
+        <h1>MardiMobil</h1>
+        <p>OSINT multi-source lookup</p>
+      </div>
+    </div>
+    <button type="button" id="openKeys" class="ghost">API keys</button>
+  </header>
+
+  <main>
+    <section class="panel query">
+      <div class="field-head">
+        <label for="targets">Targets</label>
+        <span class="muted">One per line &middot; IP, domain or hash &middot; defanged input is OK</span>
+      </div>
+      <textarea id="targets" rows="5" spellcheck="false" autocomplete="off"
+        placeholder="8.8.8.8&#10;example[.]com&#10;44d88612fea8a8f36de82e1278abb02f"></textarea>
+      <div class="row">
+        <label class="file-btn">Load from .txt
+          <input type="file" id="fileInput" accept=".txt,.csv,text/plain" hidden>
+        </label>
+        <span class="muted" id="targetCount">0 targets</span>
+        <span class="spacer"></span>
+        <span class="muted hint">Ctrl + Enter to analyze</span>
+      </div>
+
+      <div class="field-head"><span class="label">Sources</span></div>
+      <div id="sources" class="sources"></div>
+
+      <div class="row actions">
+        <label class="delay">Delay between targets
+          <input type="number" id="delay" min="0" max="120" step="1" value="0"> s
+        </label>
+        <span class="spacer"></span>
+        <button type="button" id="stop" class="ghost" hidden>Stop</button>
+        <button type="button" id="run" class="primary">Analyze</button>
+      </div>
+      <div id="progress" class="progress" hidden>
+        <div class="progress-bar"><span id="progressFill"></span></div>
+        <span id="progressText" class="muted"></span>
+      </div>
+    </section>
+
+    <section id="summary" class="panel" hidden>
+      <div class="row">
+        <h2>Results <span id="summaryCount" class="pill">0</span></h2>
+        <span class="spacer"></span>
+        <button type="button" id="exportCsv">Export CSV</button>
+        <button type="button" id="exportJson">Export JSON</button>
+        <button type="button" id="clear" class="ghost">Clear</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Target</th><th>Type</th><th>Malicious score</th><th>Worst verdict</th></tr></thead>
+          <tbody id="summaryBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="results" class="results"></section>
+  </main>
+
+  <dialog id="keysDialog">
+    <form id="keysForm" method="dialog">
+      <h2>API keys</h2>
+      <p class="muted">Saved to <code id="envPath"></code>. Leave a field empty to keep the current key.
+        Keys are never shown here again, only a short hint.</p>
+      <div id="keyFields" class="key-fields"></div>
+      <p id="keysError" class="error-text" role="alert"></p>
+      <div class="row actions">
+        <span class="spacer"></span>
+        <button type="button" id="cancelKeys" class="ghost">Cancel</button>
+        <button type="submit" class="primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
