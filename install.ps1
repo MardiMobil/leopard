@@ -1,5 +1,5 @@
 <#
-install.ps1 - Installs MardiMobil (multi-source OSINT CLI) for the current
+install.ps1 - Installs vt-search (multi-source OSINT CLI) for the current
               Windows user and sets up a private .env for API keys.
 
 Usage (from the repo folder, no admin rights needed):

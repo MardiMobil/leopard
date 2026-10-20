@@ -1,4 +1,4 @@
-# vt-search · MardiMobil OSINT
+# vt-search
 
 Check an IP address, domain or file hash against several threat-intelligence sources at once.
 You get each source's verdict plus one **0–100% malicious score**.
@@ -6,6 +6,7 @@ You get each source's verdict plus one **0–100% malicious score**.
 - **Two interfaces:** terminal (`mytool`) and browser GUI (`mytool --gui`). Both run the same code, so results are identical.
 - Runs on **Windows and Linux**.
 - Bulk lookups, CSV/JSON export, defanged input (`1.2.3[.]4`, `hxxp://evil[.]com`) and IPv6.
+- Personal: the banner, prompt and GUI header show **your own name** (see [Your display name](#your-display-name)).
 
 ---
 
@@ -120,7 +121,7 @@ Do you want to add or change any API keys? [Y/n]:
 mytool --keys
 ```
 
-**c) In the browser:** `mytool --gui` → **API keys** (top right) → enter the key → **Save**.
+**c) In the browser:** `mytool --gui` → **Settings** (top right) → enter the key → **Save**.
 
 **d) Edit the file by hand:**
 - Windows: `notepad $env:APPDATA\mytool\.env`
@@ -135,6 +136,18 @@ URLHAUS_AUTH_KEY=your_key
 No quotes needed, and no spaces around `=`.
 
 Check with `mytool --list-sources`: sources with a key show **key OK**.
+
+### Your display name
+
+The CLI banner (`A L I   M A M M A D O V`), the prompt (`Ali Mammadov >`), the goodbye
+message and the GUI header all show your name. By default it is your computer login name.
+Change it any time:
+
+- CLI: `mytool --name "Ali Mammadov"`
+- GUI: **Settings** → **Display name** → **Save**
+- or add `MYTOOL_NAME=Ali Mammadov` to your `.env`
+
+Allowed: 1–32 letters, digits, spaces, `.`, `_` and `-`.
 
 ---
 
@@ -311,6 +324,7 @@ mytool [targets ...] [options]
   --list-sources        show sources and API key status
   --keys                open the key menu and exit
   --skip-keys           don't ask about API keys on start
+  --name NAME           save your display name (banner, prompt, GUI)
   --gui                 open the browser interface
   --port PORT           GUI port (default 8765)
   --no-browser          start the GUI server without opening a browser

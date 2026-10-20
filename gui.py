@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-gui.py - Browser interface for MardiMobil.
+gui.py - Browser interface for vt-search.
 
 Starts a small web server on 127.0.0.1 (never reachable from the network) and
 opens it in your browser. Every lookup, score and export goes through
@@ -64,10 +64,10 @@ def make_handler(token: str, port: int):
     allowed_hosts = {f"127.0.0.1:{port}", f"localhost:{port}"}
 
     class Handler(BaseHTTPRequestHandler):
-        server_version = "MardiMobil"
+        server_version = "vt-search"
         sys_version = ""
 
-        def log_message(self, fmt, *args):  # keep the terminal quiet
+        def log_message(self, *_):  # keep the terminal quiet
             pass
 
         # ------------------------------------------------------------ replies
@@ -133,6 +133,7 @@ def make_handler(token: str, port: int):
                     return self._error(403, "Invalid token. Reload the page.")
                 keys, env_path = core.load_api_keys()
                 return self._json(200, {
+                    "user_name": core.load_display_name(),
                     "env_path": env_path or core.SYSTEM_ENV_PATH,
                     "sources": [{
                         "id": s.id,
@@ -178,9 +179,12 @@ def make_handler(token: str, port: int):
             return self._json(200, core.lookup(target, sources, keys))
 
         def _save_keys(self, body: dict):
-            updates = body.get("updates")
+            updates = body.get("updates", {})
+            name = str(body.get("name") or "").strip()
             if not isinstance(updates, dict):
-                return self._error(400, "Expected {updates: {source_id: key}}.")
+                return self._error(400, "Expected {updates: {source_id: key}, name?: str}.")
+            if name and not core.NAME_RE.match(name):
+                return self._error(400, "Name: use 1-32 letters, digits, spaces, '.', '_' or '-'.")
 
             # Validate everything first so a bad entry doesn't leave a half-written file.
             pending = []
@@ -200,9 +204,12 @@ def make_handler(token: str, port: int):
             try:
                 for src, value in pending:
                     core.set_env_value(path, src.key_env, value)
+                if name:
+                    core.set_env_value(path, core.NAME_ENV, name)
             except OSError as e:
                 return self._error(500, f"Could not write {path}: {e.strerror}")
-            return self._json(200, {"saved": [src.id for src, _ in pending], "env_path": path})
+            return self._json(200, {"saved": [src.id for src, _ in pending],
+                                    "user_name": core.load_display_name(), "env_path": path})
 
         def _export(self, body: dict):
             fmt, reports = body.get("format"), body.get("reports")
@@ -231,7 +238,8 @@ def serve(port: int = 8765, open_browser: bool = True) -> int:
     httpd.RequestHandlerClass = make_handler(secrets.token_urlsafe(32), port)
 
     url = f"http://127.0.0.1:{port}/"
-    print(f"{core.C.MAGENTA}{core.C.BOLD}MardiMobil GUI{core.C.RESET} running at {core.C.CYAN}{url}{core.C.RESET}")
+    print(f"{core.C.MAGENTA}{core.C.BOLD}{core.load_display_name()} OSINT GUI{core.C.RESET} "
+          f"running at {core.C.CYAN}{url}{core.C.RESET}")
     print(f"{core.C.DIM}Only this computer can open it. Press Ctrl+C to stop.{core.C.RESET}")
     if open_browser:
         threading.Timer(0.6, webbrowser.open, (url,)).start()
@@ -245,7 +253,7 @@ def serve(port: int = 8765, open_browser: bool = True) -> int:
 
 
 def main(argv=None) -> int:
-    p = argparse.ArgumentParser(prog="mytool --gui", description="MardiMobil browser interface.")
+    p = argparse.ArgumentParser(prog="mytool --gui", description="vt-search browser interface.")
     p.add_argument("--port", type=int, default=8765, help="port to listen on (default: 8765)")
     p.add_argument("--no-browser", action="store_true", help="don't open a browser window")
     args = p.parse_args(argv)

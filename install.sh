@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# install.sh - Installs MardiMobil (multi-source OSINT CLI) globally
+# install.sh - Installs vt-search (multi-source OSINT CLI) globally
 #              on Kali/Ubuntu, and sets up a local .env for API keys.
 #              On Windows use install.ps1 instead.
 #

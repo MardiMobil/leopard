@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
-MardiMobil - Multi-source OSINT CLI lookup tool.
+vt-search - Multi-source OSINT CLI lookup tool.
+
+The banner, prompt and GUI greet each user by their own display name:
+the login name by default, or whatever `mytool --name "..."` saved.
 
 Supports:
   - VirusTotal v3 REST API      (API key)   IPv4 / IPv6 / domain / hash
@@ -180,14 +183,18 @@ def _is_placeholder(value: str) -> bool:
     return value.startswith("your_") and value.endswith("_here")
 
 
+def find_env_file() -> str | None:
+    """First existing .env of: $MYTOOL_ENV, the system config file, one next to the script."""
+    return next((p for p in (os.getenv("MYTOOL_ENV"), SYSTEM_ENV_PATH, LOCAL_ENV_PATH)
+                 if p and os.path.isfile(p)), None)
+
+
 def load_api_keys() -> tuple[dict, str | None]:
     """
-    Returns ({source_id: key}, env_path_used). Order: $MYTOOL_ENV, the system
-    config file, then a .env next to the script. Real environment variables
+    Returns ({source_id: key}, env_path_used). Real environment variables
     fill in anything the file leaves empty. Placeholders count as missing.
     """
-    env_path = next((p for p in (os.getenv("MYTOOL_ENV"), SYSTEM_ENV_PATH, LOCAL_ENV_PATH)
-                     if p and os.path.isfile(p)), None)
+    env_path = find_env_file()
     file_values = dotenv_values(env_path) if env_path else {}
 
     keys = {}
@@ -198,6 +205,37 @@ def load_api_keys() -> tuple[dict, str | None]:
         if value and not _is_placeholder(value):
             keys[src.id] = value
     return keys, env_path
+
+
+# Display name shown in the banner, prompt and GUI. Letters (any language),
+# digits, spaces, '.', '_' and '-' only: it is printed straight to terminals.
+NAME_ENV = "MYTOOL_NAME"
+NAME_RE = re.compile(r"^[\w .-]{1,32}$")
+
+
+def _login_name() -> str:
+    try:
+        name = getpass.getuser().strip()
+    except Exception:  # no login name in some containers/services
+        name = ""
+    return name if NAME_RE.match(name) else "OSINT"
+
+
+def load_display_name() -> str:
+    env_path = find_env_file()
+    value = ((dotenv_values(env_path).get(NAME_ENV) if env_path else None)
+             or os.getenv(NAME_ENV) or "").strip()
+    return value if NAME_RE.match(value) else _login_name()
+
+
+def save_display_name(name: str) -> str:
+    """Validate and store the display name in the .env; returns the file path."""
+    name = name.strip()
+    if not NAME_RE.match(name):
+        raise ValueError("Use 1-32 letters, digits, spaces, '.', '_' or '-'.")
+    path = find_env_file() or SYSTEM_ENV_PATH
+    set_env_value(path, NAME_ENV, name)
+    return path
 
 
 def set_env_value(path: str, name: str, value: str):
@@ -952,10 +990,10 @@ LEOPARD_ART = r"""
 """
 
 
-def print_banner():
+def print_banner(name: str):
     clear_screen()
     print(f"{C.MAGENTA}{C.BOLD}")
-    print("  M A R D I   M O B I L")
+    print("  " + "   ".join(" ".join(word.upper()) for word in name.split()))
     print("  OSINT Multi-Source CLI")
     print(f"{C.RESET}")
     print(f"{C.GREEN}{LEOPARD_ART}{C.RESET}")
@@ -1013,14 +1051,15 @@ def run_batch(targets: list[str], sources: list[Source], keys: dict, delay: floa
     return reports
 
 
-def interactive(keys: dict, env_path: str | None, ask_keys: bool) -> list[dict]:
-    print_banner()
+def interactive(keys: dict, env_path: str | None, ask_keys: bool, name: str) -> list[dict]:
+    goodbye = f"{C.CYAN}Goodbye, {name}!{C.RESET}"
+    print_banner(name)
     try:
         if ask_keys:
             keys, env_path = maybe_edit_keys(keys, env_path)
         sources = prompt_sources(keys, env_path)
     except (EOFError, KeyboardInterrupt):
-        print(f"\n{C.CYAN}Exiting MardiMobil. Goodbye!{C.RESET}")
+        print(f"\n{goodbye}")
         return []
 
     print(f"\n{C.GREEN}Setup complete. Enter an IP, domain, or file hash to look up.{C.RESET}")
@@ -1029,15 +1068,15 @@ def interactive(keys: dict, env_path: str | None, ask_keys: bool) -> list[dict]:
     reports = []
     while True:
         try:
-            user_input = read_line(f"{C.MAGENTA}{C.BOLD}MardiMobil > {C.RESET}")
+            user_input = read_line(f"{C.MAGENTA}{C.BOLD}{name} > {C.RESET}")
         except (EOFError, KeyboardInterrupt):
-            print(f"\n{C.CYAN}Exiting MardiMobil. Goodbye!{C.RESET}")
+            print(f"\n{goodbye}")
             break
 
         if not user_input:
             continue
         if user_input.lower() in ("exit", "quit"):
-            print(f"{C.CYAN}Exiting MardiMobil. Goodbye!{C.RESET}")
+            print(goodbye)
             break
         if user_input.lower().startswith("save"):
             path = user_input[4:].strip()
@@ -1069,7 +1108,7 @@ def read_targets(path: str) -> list[str]:
 def parse_args(argv=None):
     p = argparse.ArgumentParser(
         prog="mytool",
-        description="MardiMobil - multi-source OSINT lookup for IPs, domains and file hashes.",
+        description="vt-search - multi-source OSINT lookup for IPs, domains and file hashes.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "examples:\n"
@@ -1080,6 +1119,7 @@ def parse_args(argv=None):
             "  mytool -f iocs.txt --delay 15        respect free VirusTotal limits (4/min)\n"
             "  mytool --keys                        add or change API keys\n"
             "  mytool --gui                         open the browser interface\n"
+            "  mytool --name \"Your Name\"            set the name shown in the banner and GUI\n"
             "\nOn start you are asked whether to change API keys (Enter = yes);\n"
             "--skip-keys skips that question. It is never asked when input is piped.\n"
             "\nsources: " + ", ".join(s.id for s in SOURCES)
@@ -1096,6 +1136,8 @@ def parse_args(argv=None):
     p.add_argument("--keys", action="store_true", help="add or change API keys, then exit")
     p.add_argument("--skip-keys", action="store_true",
                    help="don't ask about changing API keys on start")
+    p.add_argument("--name", metavar="NAME",
+                   help="save your display name (banner, prompt, GUI); default: your login name")
     p.add_argument("--gui", action="store_true", help="open the browser interface instead")
     p.add_argument("--port", type=int, default=8765, help="port for --gui (default: 8765)")
     p.add_argument("--no-browser", action="store_true",
@@ -1117,7 +1159,22 @@ def parse_args(argv=None):
 def main(argv=None) -> int:
     args = parse_args(argv)
     setup_console(args.no_color)
+
+    if args.name is not None:
+        try:
+            path = save_display_name(args.name)
+        except ValueError as e:
+            print(f"{C.RED}[!] Invalid name: {e}{C.RESET}")
+            return 2
+        except OSError as e:
+            print(f"{C.RED}[!] Could not save the name: {e.strerror}{C.RESET}")
+            return 1
+        print(f"{C.GREEN}[+] Display name set to '{args.name.strip()}' ({path}).{C.RESET}")
+        if not (args.targets or args.file or args.gui or args.keys or args.list_sources):
+            return 0
+
     keys, env_path = load_api_keys()
+    name = load_display_name()
 
     if args.list_sources:
         print_sources(keys, env_path)
@@ -1154,7 +1211,7 @@ def main(argv=None) -> int:
                 pass
         reports = run_batch(targets, args.sources, keys, args.delay)
     else:
-        reports = interactive(keys, env_path, ask_keys)
+        reports = interactive(keys, env_path, ask_keys, name)
 
     if args.output and reports:
         try:
