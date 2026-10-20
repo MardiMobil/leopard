@@ -208,8 +208,19 @@ function gauge(score) {
   return wrap;
 }
 
+// "View on <source>" link to the source's own page; only plain https URLs are used.
+function sourceLink(r) {
+  if (!r.link || !/^https:\/\/[^\s]+$/.test(r.link)) return null;
+  const a = el('a', 'source-link', `View on ${r.name} ↗`);
+  a.href = r.link;
+  a.target = '_blank';
+  a.rel = 'noopener noreferrer';
+  return a;
+}
+
 function sourceCard(r) {
   const card = el('section', `source-card ${r.status} ${r.status === 'ok' ? r.verdict : ''}`);
+  const link = sourceLink(r);
   const head = el('header');
   head.append(el('h4', null, r.name));
   if (r.status === 'ok') {
@@ -222,6 +233,7 @@ function sourceCard(r) {
 
   if (r.status !== 'ok') {
     card.append(el('p', 'message', r.message));
+    if (link) card.append(link);
     return card;
   }
   const dl = el('dl');
@@ -237,6 +249,7 @@ function sourceCard(r) {
     dl.append(el('dt', null, key), dd);
   }
   card.append(dl);
+  if (link) card.append(link);
   return card;
 }
 

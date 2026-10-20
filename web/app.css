@@ -201,6 +201,12 @@ dt { color: var(--muted); }
 dd { margin: 0; word-break: break-word; }
 dd ul { margin: 0; padding-left: 16px; }
 dd li { color: var(--muted); }
+.source-card { display: flex; flex-direction: column; }
+.source-link {
+  margin-top: auto; padding-top: 10px; align-self: flex-start;
+  color: var(--accent-2); font-size: 12.5px; font-weight: 600; text-decoration: none;
+}
+.source-link:hover { text-decoration: underline; }
 
 /* ---------------------------------------------------------------- dialog */
 dialog { width: min(560px, calc(100vw - 32px)); background: var(--panel); color: var(--ink);

@@ -165,7 +165,8 @@ Press **Ctrl+C** in the terminal to stop it.
 3. Click **Analyze** (or press **Ctrl+Enter**).
 4. Each target gets a card:
    - on the left, a **score ring** with the malicious score (%);
-   - on the right, one card per source with its result.
+   - on the right, one card per source with its result;
+   - each card ends with **View on &lt;source&gt; ↗**, which opens that indicator on the source's own website in a new tab.
 5. The **Results** table lists every target with its score. Click a target to jump to its card.
 6. **Export CSV / Export JSON** downloads the results. **Clear** empties the page.
 
@@ -209,6 +210,10 @@ evil-domain.com
 44d88612fea8a8f36de82e1278abb02f
 ```
 At the end you get a summary table with every target's score.
+
+Every source result ends with a `Link :` line pointing to that indicator on the source's own website
+(in Windows Terminal, **Ctrl+click** opens it). The link is shown even when a source was skipped
+for a missing key, so you can still check it in the browser. CSV exports have a `link` column too.
 
 **For testing:** `44d88612fea8a8f36de82e1278abb02f` is the hash of the harmless **EICAR** test file.
 Antivirus engines flag it as malicious, so it's a safe way to see a high score.

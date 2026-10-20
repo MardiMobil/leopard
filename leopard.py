@@ -40,6 +40,7 @@ import socket
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
+from urllib.parse import quote
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -707,16 +708,38 @@ LOOKUPS = {
 }
 
 
+def source_link(src_id: str, value: str, kind: str) -> str:
+    """The source's own public web page for this indicator (works without a key)."""
+    v = quote(value, safe=":.")
+    is_ip = kind in IP
+    if src_id == "vt":
+        return f"https://www.virustotal.com/gui/{'ip-address' if is_ip else kind if kind == 'domain' else 'file'}/{v}"
+    if src_id == "abuseipdb":
+        return f"https://www.abuseipdb.com/check/{v}"
+    if src_id == "otx":
+        return f"https://otx.alienvault.com/indicator/{'ip' if is_ip else kind if kind == 'domain' else 'file'}/{v}"
+    if src_id == "urlhaus":
+        return (f"https://urlhaus.abuse.ch/browse.php?search={v}" if kind == "hash"
+                else f"https://urlhaus.abuse.ch/host/{v}/")
+    if src_id == "shodan":
+        return f"https://www.shodan.io/host/{v}"
+    if src_id == "bgp":
+        return f"https://bgp.he.net/{'ip' if is_ip else 'dns'}/{v}"
+    return ""
+
+
 # ---------------------------------------------------------------------------
 # Running lookups
 # ---------------------------------------------------------------------------
 def run_source(src: Source, value: str, kind: str, keys: dict) -> dict:
     """Run one source; every failure becomes a result instead of an exception."""
     result = {"source": src.id, "name": src.name, "status": "ok",
-              "verdict": "", "score": None, "fields": {}, "message": ""}
+              "verdict": "", "score": None, "fields": {}, "message": "", "link": ""}
     if kind not in src.kinds:
         result.update(status="skipped", message=f"{src.name} only supports {describe_kinds(src.kinds)}.")
         return result
+    # Even when the lookup is skipped (no key) or fails, the web page still works.
+    result["link"] = source_link(src.id, value, kind)
     key = keys.get(src.id, "")
     if src.key_env and not key and not src.key_optional:
         result.update(status="skipped", message=f"No API key. Add {src.key_env} to your .env.")
@@ -798,16 +821,19 @@ def verdict_text(verdict: str) -> str:
     return f"{style[0]}{C.BOLD}{style[1]}{C.RESET}" if style else "-"
 
 
+def print_link(r: dict):
+    if r.get("link"):
+        print(f"  {C.DIM}{'Link':<16}: {r['link']}{C.RESET}")
+
+
 def print_result(r: dict):
     name = r["name"]
-    if r["status"] == "skipped":
-        print(f"{C.YELLOW}[{name}] Skipped - {r['message']}{C.RESET}\n")
-        return
-    if r["status"] == "error":
-        print(f"{C.RED}[{name}] {r['message']}{C.RESET}\n")
-        return
-    if r["status"] == "not_found":
-        print(f"{C.YELLOW}[{name}] {r['message']}{C.RESET}\n")
+    if r["status"] != "ok":
+        color = C.RED if r["status"] == "error" else C.YELLOW
+        prefix = "Skipped - " if r["status"] == "skipped" else ""
+        print(f"{color}[{name}] {prefix}{r['message']}{C.RESET}")
+        print_link(r)
+        print()
         return
 
     label_color = {"Malicious": C.RED, "Suspicious": C.YELLOW,
@@ -822,6 +848,7 @@ def print_result(r: dict):
         else:
             color = label_color.get(label, "")
             print(f"  {color}{label:<16}: {value}{C.RESET if color else ''}")
+    print_link(r)
     print()
 
 
@@ -929,11 +956,11 @@ def export_text(reports: list[dict], fmt: str) -> str:
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow(["timestamp", "target", "type", "risk_score", "risk_level",
-                "source", "status", "verdict", "source_score", "details"])
+                "source", "status", "verdict", "source_score", "details", "link"])
     for rep in reports:
         if rep.get("error"):
             w.writerow([_cell(x) for x in (rep["timestamp"], rep["value"], rep["type"],
-                                           "", "", "", "invalid", "", "", rep["error"])])
+                                           "", "", "", "invalid", "", "", rep["error"], "")])
             continue
         score = rep.get("score") or {}
         for r in rep["results"]:
@@ -944,7 +971,7 @@ def export_text(reports: list[dict], fmt: str) -> str:
                 rep["timestamp"], rep["value"], rep["type"],
                 score.get("value", ""), score.get("level", ""),
                 r["name"], r["status"], r["verdict"],
-                "" if r.get("score") is None else r["score"], details)])
+                "" if r.get("score") is None else r["score"], details, r.get("link", ""))])
     return buf.getvalue()
 
 
