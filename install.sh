@@ -2,6 +2,7 @@
 #
 # install.sh - Installs MardiMobil (multi-source OSINT CLI) globally
 #              on Kali/Ubuntu, and sets up a local .env for API keys.
+#              On Windows use install.ps1 instead.
 #
 # Usage:
 #   sudo bash install.sh
@@ -10,6 +11,9 @@ set -euo pipefail
 
 TOOL_NAME="mytool"
 SOURCE_FILE="mytool.py"
+# The code (CLI, GUI and its web/ assets) lives in LIB_DIR; INSTALL_PATH is a
+# small launcher so `mytool` and `mytool --gui` work from anywhere.
+LIB_DIR="/usr/local/lib/${TOOL_NAME}"
 INSTALL_PATH="/usr/local/bin/${TOOL_NAME}"
 REQUIRED_PY_IMPORTS=("requests" "bs4" "dotenv")   # import names
 PIP_PACKAGES=("requests" "beautifulsoup4" "python-dotenv")
@@ -82,6 +86,9 @@ if [[ ! -f "${ENV_PATH}" ]]; then
 # Add your API keys below
 VIRUSTOTAL_API_KEY=your_vt_api_key_here
 ABUSEIPDB_API_KEY=your_abuseip_api_key_here
+# Optional: OTX works without a key, a key raises the rate limit
+OTX_API_KEY=your_otx_api_key_here
+URLHAUS_AUTH_KEY=your_urlhaus_auth_key_here
 EOF
     chmod 600 "${ENV_PATH}"
     echo "[+] .env created. Edit it with your real API keys before using Mode 1 (API search)."
@@ -97,16 +104,30 @@ if [[ ! -f "${LOCAL_ENV_PATH}" ]]; then
 # Add your API keys below
 VIRUSTOTAL_API_KEY=your_vt_api_key_here
 ABUSEIPDB_API_KEY=your_abuseip_api_key_here
+# Optional: OTX works without a key, a key raises the rate limit
+OTX_API_KEY=your_otx_api_key_here
+URLHAUS_AUTH_KEY=your_urlhaus_auth_key_here
 EOF
+    chmod 600 "${LOCAL_ENV_PATH}"
 fi
 
 # --- Install the tool ------------------------------------------------------
-echo "[*] Copying ${SOURCE_FILE} to ${INSTALL_PATH}..."
-cp "${SRC_PATH}" "${INSTALL_PATH}"
-chmod +x "${INSTALL_PATH}"
+echo "[*] Copying mytool.py, gui.py and web/ to ${LIB_DIR}..."
+mkdir -p "${LIB_DIR}/web"
+cp "${SRC_PATH}" "${SCRIPT_DIR}/gui.py" "${LIB_DIR}/"
+cp -r "${SCRIPT_DIR}/web/." "${LIB_DIR}/web/"
+chmod -R a+rX "${LIB_DIR}"
+
+# Replace an old single-file install (a copy of mytool.py) with the launcher.
+cat > "${INSTALL_PATH}" << EOF
+#!/bin/sh
+exec python3 "${LIB_DIR}/mytool.py" "\$@"
+EOF
+chmod 755 "${INSTALL_PATH}"
 
 echo ""
 echo "[+] Installation complete!"
 echo "[+] Edit your API keys here: ${ENV_PATH}"
 echo "[+] Run the tool from anywhere by typing: ${TOOL_NAME}"
+echo "[+] Browser interface: ${TOOL_NAME} --gui"
 echo ""
