@@ -551,7 +551,10 @@ def otx_lookup(key: str, value: str, kind: str):
     headers = {"Accept": "application/json", **({"X-OTX-API-KEY": key} if key else {})}
     # OTX can take 15-25 s for popular indicators with thousands of pulses.
     resp = http("GET", f"https://otx.alienvault.com/api/v1/indicators/{section}/{value}/general",
-                "AlienVault OTX", headers=headers, timeout=35)
+                "AlienVault OTX", headers=headers, timeout=35, retry_429=False)
+    # Waiting out OTX's Retry-After (20-40 s) would hold up the whole report.
+    if resp.status_code == 429 and not key:
+        raise SourceError("AlienVault OTX rate limit exceeded. Add a free OTX_API_KEY for higher limits.")
     data = check(resp, "AlienVault OTX", value)
 
     info = data.get("pulse_info") or {}
