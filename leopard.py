@@ -6,29 +6,36 @@ The banner, prompt and GUI greet each user by their own display name:
 the login name by default, or whatever `leopard --name "..."` saved.
 
 Supports:
-  - VirusTotal v3 REST API      (API key)   IPv4 / IPv6 / domain / hash
+  - VirusTotal v3 REST API      (API key)   IPv4 / IPv6 / domain / URL / hash
   - AbuseIPDB v2 REST API       (API key)   IPv4 / IPv6
   - AlienVault OTX              (API key)   IPv4 / IPv6 / domain / hash
-  - URLhaus (abuse.ch)          (Auth-Key)  IPv4 / domain / hash
+  - URLhaus (abuse.ch)          (Auth-Key)  IPv4 / domain / URL / hash
   - Shodan InternetDB           (no key)    IPv4
   - bgp.he.net public lookup    (scraped)   IPv4 / IPv6 / domain
+  - ThreatFox (abuse.ch)        (Auth-Key)  IPv4 / domain / URL / hash
+  - MalwareBazaar (abuse.ch)    (Auth-Key)  hash
+  - RDAP (rdap.org)             (no key)    domain
 
 Usage:
   leopard                              interactive menu
   leopard 8.8.8.8 example.com          look targets up directly
   leopard -f targets.txt -o out.csv    bulk lookup, save results
+  leopard -x incident.txt              pull the IOCs out of free text, look them up
   leopard --list-sources               show sources and which keys are set
 
 Detects the input type (defanged input such as 1.2.3[.]4 or hxxp://... is OK)
 and queries the selected sources in parallel. Keyed sources without a key are
-skipped with a hint instead of failing the whole run.
+skipped with a hint instead of failing the whole run. A URL goes to the sources
+that know URLs; the others check its host instead.
 """
 
 from __future__ import annotations
 
 import argparse
+import base64
 import csv
 import getpass
+import hashlib
 import io
 import ipaddress
 import json
@@ -116,6 +123,7 @@ LOCAL_ENV_PATH = os.path.join(SCRIPT_DIR, ".env")
 # ---------------------------------------------------------------------------
 IP = frozenset({"ipv4", "ipv6"})
 ALL_KINDS = frozenset({"ipv4", "ipv6", "domain", "hash"})
+ABUSE_CH_KINDS = frozenset({"ipv4", "domain", "url", "hash"})
 
 
 @dataclass(frozen=True)
@@ -130,26 +138,37 @@ class Source:
 
 # Order = menu numbers in interactive mode.
 SOURCES = [
-    Source("vt", "VirusTotal", ALL_KINDS, "VIRUSTOTAL_API_KEY", weight=1.0),
+    Source("vt", "VirusTotal", ALL_KINDS | {"url"}, "VIRUSTOTAL_API_KEY", weight=1.0),
     Source("abuseipdb", "AbuseIPDB", IP, "ABUSEIPDB_API_KEY", weight=0.9),
     Source("otx", "AlienVault OTX", ALL_KINDS, "OTX_API_KEY", key_optional=True, weight=0.4),
-    Source("urlhaus", "URLhaus", frozenset({"ipv4", "domain", "hash"}), "URLHAUS_AUTH_KEY",
-           weight=0.9),
+    Source("urlhaus", "URLhaus", ABUSE_CH_KINDS, "URLHAUS_AUTH_KEY", weight=0.9),
     Source("shodan", "Shodan InternetDB", frozenset({"ipv4"}), weight=0.5),
     Source("bgp", "bgp.he.net", IP | {"domain"}),
+    # abuse.ch has one Auth-Key for all its services, so these share URLhaus' key.
+    Source("threatfox", "ThreatFox", ABUSE_CH_KINDS, "URLHAUS_AUTH_KEY", weight=0.9),
+    Source("bazaar", "MalwareBazaar", frozenset({"hash"}), "URLHAUS_AUTH_KEY", weight=0.9),
+    Source("rdap", "RDAP", frozenset({"domain"}), weight=0.4),
 ]
-KEYED_SOURCES = [s for s in SOURCES if s.key_env]
+# One entry per key: a shared key is listed under the first source that uses it.
+KEYED_SOURCES = [s for s in SOURCES
+                 if s.key_env and next(o for o in SOURCES if o.key_env == s.key_env) is s]
+KEY_NAMES = {"URLHAUS_AUTH_KEY": "abuse.ch"}
 SOURCE_BY_ID = {s.id: s for s in SOURCES}
-SOURCE_ALIASES = {"virustotal": "vt", "abuse": "abuseipdb", "alienvault": "otx", "bgp.he.net": "bgp"}
+SOURCE_ALIASES = {"virustotal": "vt", "abuse": "abuseipdb", "alienvault": "otx", "bgp.he.net": "bgp",
+                  "malwarebazaar": "bazaar"}
 
-KIND_LABEL = {"ipv4": "IPv4", "ipv6": "IPv6", "domain": "Domain", "hash": "Hash"}
+KIND_LABEL = {"ipv4": "IPv4", "ipv6": "IPv6", "domain": "Domain", "url": "URL", "hash": "Hash"}
 KIND_PLURAL = {"ipv4": "IPv4 addresses", "ipv6": "IPv6 addresses",
-               "domain": "domains", "hash": "file hashes"}
+               "domain": "domains", "url": "URLs", "hash": "file hashes"}
+
+
+def key_name(src: Source) -> str:
+    return KEY_NAMES.get(src.key_env, src.name)
 
 
 def describe_kinds(kinds) -> str:
     order = ["ip"] if IP <= kinds else [k for k in ("ipv4", "ipv6") if k in kinds]
-    order += [k for k in ("domain", "hash") if k in kinds]
+    order += [k for k in ("domain", "url", "hash") if k in kinds]
     names = ["IP addresses" if k == "ip" else KIND_PLURAL[k] for k in order]
     return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
 
@@ -291,7 +310,7 @@ def edit_keys(keys: dict, env_path: str | None) -> tuple[dict, str | None]:
                 state = f"{C.GREEN}{_mask(keys[src.id])}{C.RESET}"
             else:
                 state = f"{C.YELLOW}not set{' (optional)' if src.key_optional else ''}{C.RESET}"
-            print(f"  [{i}] {src.name:<16} {C.DIM}{src.key_env:<20}{C.RESET} {state}")
+            print(f"  [{i}] {key_name(src):<16} {C.DIM}{src.key_env:<20}{C.RESET} {state}")
         choice = read_line(f"{C.YELLOW}Which key to add/change? (number, Enter = done) > {C.RESET}")
         if not choice:
             break
@@ -300,7 +319,7 @@ def edit_keys(keys: dict, env_path: str | None) -> tuple[dict, str | None]:
             continue
 
         src = KEYED_SOURCES[int(choice) - 1]
-        value = getpass.getpass(f"New {src.name} key (typing is hidden, Enter = cancel): ")
+        value = getpass.getpass(f"New {key_name(src)} key (typing is hidden, Enter = cancel): ")
         value = value.replace("﻿", "").strip().strip("'\"")
         if not value:
             print(f"{C.DIM}Cancelled.{C.RESET}")
@@ -343,25 +362,46 @@ DOMAIN_RE = re.compile(
 )
 
 
+def refang(text: str) -> str:
+    """Undo the usual defanging: 1.2.3[.]4, evil(.)com, hxxp[://]..."""
+    for a, b in (("[.]", "."), ("(.)", "."), ("{.}", "."), ("[dot]", "."), ("(dot)", "."),
+                 ("[://]", "://"), ("[:]", ":")):
+        text = text.replace(a, b)
+    return re.sub(r"\bhxxp", "http", text, flags=re.I)
+
+
 def normalize(raw: str) -> tuple[str, str]:
     """
     Refang and clean the input, then detect its type.
-    Returns (value, kind) where kind is ipv4 | ipv6 | domain | hash |
-    private | unknown.
+    Returns (value, kind) where kind is ipv4 | ipv6 | domain | url | hash |
+    private | unknown. A web URL with a path or query stays a URL; without one
+    ('http://evil.com/') there is nothing beyond the host to check.
     """
-    s = raw.strip()
-    for a, b in (("[.]", "."), ("(.)", "."), ("{.}", "."), ("[dot]", "."), ("[:]", ":")):
-        s = s.replace(a, b)
-    s = re.sub(r"^hxxp", "http", s, flags=re.I)
-    if "://" in s:                       # full URL -> host part
-        s = s.split("://", 1)[1]
-    s = re.split(r"[/?#]", s)[0]
+    s = refang(raw.strip())
+    scheme = ""
+    if "://" in s:
+        scheme, s = s.split("://", 1)
+    authority = re.split(r"[/?#]", s)[0]
+    tail = s[len(authority):].split("#")[0]
+    s = authority
     if s.startswith("[") and "]" in s:   # [ipv6]:port
         s = s[1:s.index("]")]
     elif s.count(":") == 1:              # host:port
         s = s.split(":")[0]
     s = s.rstrip(".")
 
+    value, kind = _classify(s)
+    if scheme.lower() in ("http", "https") and tail.strip("/") and kind in ("ipv4", "ipv6", "domain"):
+        return f"{scheme.lower()}://{authority.lower()}{tail}", "url"
+    return value, kind
+
+
+def url_host(url: str) -> tuple[str, str]:
+    """(value, kind) of a normalized URL's host."""
+    return normalize(re.split(r"[/?]", url.split("://", 1)[1])[0])
+
+
+def _classify(s: str) -> tuple[str, str]:
     if HASH_RE.match(s):
         return s.lower(), "hash"
     try:
@@ -436,8 +476,12 @@ def clean_fields(fields: dict) -> dict:
 # maliciousness estimate, or None when the source says nothing about threat.
 # ---------------------------------------------------------------------------
 def vt_lookup(key: str, value: str, kind: str):
-    path = {"ipv4": "ip_addresses", "ipv6": "ip_addresses", "domain": "domains", "hash": "files"}[kind]
-    resp = http("GET", f"https://www.virustotal.com/api/v3/{path}/{value}", "VirusTotal",
+    path = {"ipv4": "ip_addresses", "ipv6": "ip_addresses", "domain": "domains", "url": "urls",
+            "hash": "files"}[kind]
+    # A URL's id is its unpadded base64. This only reads an existing report:
+    # submitting an unknown URL would publish it to VirusTotal's users.
+    target = base64.urlsafe_b64encode(value.encode()).decode().rstrip("=") if kind == "url" else value
+    resp = http("GET", f"https://www.virustotal.com/api/v3/{path}/{target}", "VirusTotal",
                 headers={"x-apikey": key, "Accept": "application/json"})
     data = check(resp, "VirusTotal", value)
     try:
@@ -460,6 +504,12 @@ def vt_lookup(key: str, value: str, kind: str):
     elif kind == "domain":
         cats = attrs.get("categories") or {}
         fields.update({"Reputation": attrs.get("reputation"), "Registrar": attrs.get("registrar"),
+                       "Categories": ", ".join(sorted(set(cats.values())))})
+    elif kind == "url":
+        cats = attrs.get("categories") or {}
+        fields.update({"Title": attrs.get("title"), "Final URL": attrs.get("last_final_url"),
+                       "HTTP Status": attrs.get("last_http_response_code"),
+                       "Reputation": attrs.get("reputation"),
                        "Categories": ", ".join(sorted(set(cats.values())))})
     else:
         names = attrs.get("meaningful_name") or attrs.get("names") or []
@@ -529,6 +579,8 @@ def urlhaus_lookup(key: str, value: str, kind: str):
         if not field:
             raise SourceError("URLhaus only supports MD5 and SHA-256 hashes, not SHA-1.")
         url, payload = "https://urlhaus-api.abuse.ch/v1/payload/", {field: value}
+    elif kind == "url":
+        url, payload = "https://urlhaus-api.abuse.ch/v1/url/", {"url": value}
     else:
         url, payload = "https://urlhaus-api.abuse.ch/v1/host/", {"host": value}
     resp = http("POST", url, "URLhaus", headers={"Auth-Key": key, "Accept": "application/json"},
@@ -540,6 +592,18 @@ def urlhaus_lookup(key: str, value: str, kind: str):
         return "clean", {"Result": "No malware URLs or payloads recorded"}, 0
     if status != "ok":
         raise SourceError(f"URLhaus query failed ({status}).")
+    blacklists = {k: v for k, v in (data.get("blacklists") or {}).items() if v and v != "not listed"}
+
+    if kind == "url":
+        online = data.get("url_status") == "online"
+        return "malicious" if online else "suspicious", clean_fields({
+            "Status": data.get("url_status"),
+            "Threat": data.get("threat"),
+            "Tags": ", ".join((data.get("tags") or [])[:10]),
+            "Blacklists": ", ".join(f"{k}: {v}" for k, v in blacklists.items()),
+            "Date Added": data.get("date_added"),
+            "Payloads": len(data.get("payloads") or []),
+        }), 100 if online else 60
 
     if kind == "hash":
         return "malicious", clean_fields({
@@ -554,7 +618,6 @@ def urlhaus_lookup(key: str, value: str, kind: str):
     online = [u for u in urls if u.get("url_status") == "online"]
     threats = sorted({u.get("threat") for u in urls if u.get("threat")})
     tags = sorted({t for u in urls for t in (u.get("tags") or [])})
-    blacklists = {k: v for k, v in (data.get("blacklists") or {}).items() if v and v != "not listed"}
     verdict = "malicious" if online else "suspicious" if urls else "clean"
     return verdict, clean_fields({
         "Malware URLs": data.get("url_count", len(urls)),
@@ -698,6 +761,135 @@ def bgp_lookup(key: str, value: str, kind: str):
     return "info", clean_fields(fields), None
 
 
+def _same_ioc(ioc: str, value: str, kind: str) -> bool:
+    """ThreatFox's search is fuzzy and stores ip:port and URLs; compare like with like."""
+    found, found_kind = normalize(ioc)
+    if kind == "url":
+        return found == value
+    return (url_host(found)[0] if found_kind == "url" else found) == value
+
+
+def _threatfox_query(key: str, payload: dict, value: str) -> list[dict]:
+    resp = http("POST", "https://threatfox-api.abuse.ch/api/v1/", "ThreatFox",
+                headers={"Auth-Key": key, "Accept": "application/json"}, json=payload)
+    data = check(resp, "ThreatFox", value)
+    status = data.get("query_status")
+    if status == "no_result":
+        return []
+    if status != "ok":
+        raise SourceError(f"ThreatFox query failed ({status}).")
+    iocs = data.get("data")
+    if not isinstance(iocs, list):
+        raise SourceError("ThreatFox returned an unexpected response structure.")
+    return iocs
+
+
+def threatfox_lookup(key: str, value: str, kind: str):
+    iocs = [i for i in _threatfox_query(key, {"query": "search_ioc", "search_term": value}, value)
+            if _same_ioc(str(i.get("ioc", "")), value, kind)]
+    # A hash that isn't an IOC itself can still be the sample behind other IOCs.
+    if not iocs and kind == "hash" and len(value) != 40:
+        iocs = _threatfox_query(key, {"query": "search_hash", "hash": value}, value)
+    if not iocs:
+        return "clean", {"Result": "No IOC recorded"}, 0
+
+    confidence = max(i.get("confidence_level") or 0 for i in iocs)
+    families = sorted({i.get("malware_printable") for i in iocs} - {None, ""})
+    threats = sorted({i.get("threat_type") for i in iocs} - {None, ""})
+    tags = sorted({t for i in iocs for t in (i.get("tags") or [])})
+    return "malicious" if confidence >= 75 else "suspicious", clean_fields({
+        "IOCs": len(iocs),
+        "Malware": ", ".join(families[:8]),
+        "Threat Types": ", ".join(threats),
+        "Confidence": f"{confidence}%",
+        "Tags": ", ".join(tags[:10]),
+        "First Seen": min((i["first_seen"] for i in iocs if i.get("first_seen")), default=None),
+        "Matches": [i.get("ioc", "") for i in iocs[:3]],
+    }), confidence
+
+
+def bazaar_lookup(key: str, value: str, kind: str):
+    resp = http("POST", "https://mb-api.abuse.ch/api/v1/", "MalwareBazaar",
+                headers={"Auth-Key": key, "Accept": "application/json"},
+                data={"query": "get_info", "hash": value})
+    data = check(resp, "MalwareBazaar", value)
+
+    status = data.get("query_status")
+    if status in ("hash_not_found", "no_results"):
+        return "clean", {"Result": "Sample not in MalwareBazaar"}, 0
+    if status != "ok":
+        raise SourceError(f"MalwareBazaar query failed ({status}).")
+    samples = data.get("data")
+    if not isinstance(samples, list) or not samples:
+        raise SourceError("MalwareBazaar returned an unexpected response structure.")
+
+    s = samples[0]
+    return "malicious", clean_fields({
+        "Signature": s.get("signature"),
+        "File Name": s.get("file_name"),
+        "File Type": s.get("file_type"),
+        "Size": s.get("file_size"),
+        "Tags": ", ".join((s.get("tags") or [])[:10]),
+        "Delivery": s.get("delivery_method"),
+        "First Seen": s.get("first_seen"),
+        "Last Seen": s.get("last_seen"),
+        "SHA-256": s.get("sha256_hash"),
+    }), 100
+
+
+def _rdap_date(value: str | None) -> datetime | None:
+    try:
+        return datetime.fromisoformat((value or "").replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _vcard_name(entity: dict) -> str | None:
+    vcard = entity.get("vcardArray") or [None, []]
+    return next((prop[3] for prop in vcard[1] if prop[0] == "fn"), None)
+
+
+def rdap_lookup(key: str, value: str, kind: str):
+    # We have no public-suffix list, so walk up from the full host until a
+    # registry knows the name: www.evil.co.uk -> evil.co.uk.
+    labels = value.split(".")
+    for i in range(min(len(labels) - 1, 3)):
+        domain = ".".join(labels[i:])
+        resp = http("GET", f"https://rdap.org/domain/{domain}", "RDAP",
+                    headers={"Accept": "application/rdap+json"})
+        if resp.status_code != 404:
+            break
+    else:
+        raise NotFound("No RDAP record (the registry may not offer RDAP).")
+    data = check(resp, "RDAP", value)
+
+    events = {e.get("eventAction"): e.get("eventDate") for e in data.get("events") or []}
+    created, expires = _rdap_date(events.get("registration")), _rdap_date(events.get("expiration"))
+    if created and not created.tzinfo:
+        created = created.replace(tzinfo=timezone.utc)
+    age = (datetime.now(timezone.utc) - created).days if created else None
+    # A brand-new domain is a classic phishing sign; an old one proves nothing.
+    if age is None:
+        verdict, score = "info", None
+    elif age < 30:
+        verdict, score = "suspicious", 50
+    else:
+        verdict, score = "info", 25 if age < 90 else 0
+
+    registrar = next((_vcard_name(e) for e in data.get("entities") or []
+                      if "registrar" in (e.get("roles") or [])), None)
+    return verdict, clean_fields({
+        "Domain": domain,
+        "Registered": f"{created:%Y-%m-%d}" if created else None,
+        "Age": f"{age} days" if age is not None else None,
+        "Expires": f"{expires:%Y-%m-%d}" if expires else None,
+        "Registrar": registrar,
+        "Status": ", ".join(data.get("status") or []),
+        "Nameservers": [n.get("ldhName", "").lower().rstrip(".")
+                        for n in (data.get("nameservers") or [])[:4]],
+    }), score
+
+
 LOOKUPS = {
     "vt": vt_lookup,
     "abuseipdb": abuseipdb_lookup,
@@ -705,6 +897,9 @@ LOOKUPS = {
     "urlhaus": urlhaus_lookup,
     "shodan": shodan_lookup,
     "bgp": bgp_lookup,
+    "threatfox": threatfox_lookup,
+    "bazaar": bazaar_lookup,
+    "rdap": rdap_lookup,
 }
 
 
@@ -713,18 +908,27 @@ def source_link(src_id: str, value: str, kind: str) -> str:
     v = quote(value, safe=":.")
     is_ip = kind in IP
     if src_id == "vt":
+        if kind == "url":
+            return f"https://www.virustotal.com/gui/url/{hashlib.sha256(value.encode()).hexdigest()}"
         return f"https://www.virustotal.com/gui/{'ip-address' if is_ip else kind if kind == 'domain' else 'file'}/{v}"
     if src_id == "abuseipdb":
         return f"https://www.abuseipdb.com/check/{v}"
     if src_id == "otx":
         return f"https://otx.alienvault.com/indicator/{'ip' if is_ip else kind if kind == 'domain' else 'file'}/{v}"
     if src_id == "urlhaus":
-        return (f"https://urlhaus.abuse.ch/browse.php?search={v}" if kind == "hash"
+        return (f"https://urlhaus.abuse.ch/browse.php?search={v}" if kind in ("hash", "url")
                 else f"https://urlhaus.abuse.ch/host/{v}/")
     if src_id == "shodan":
         return f"https://www.shodan.io/host/{v}"
     if src_id == "bgp":
         return f"https://bgp.he.net/{'ip' if is_ip else 'dns'}/{v}"
+    if src_id == "threatfox":
+        return f"https://threatfox.abuse.ch/browse.php?search=ioc%3A{v}"
+    if src_id == "bazaar":
+        algo = {32: "md5", 40: "sha1"}.get(len(value), "sha256")
+        return f"https://bazaar.abuse.ch/browse.php?search={algo}%3A{v}"
+    if src_id == "rdap":
+        return f"https://lookup.icann.org/en/lookup?name={v}"
     return ""
 
 
@@ -735,6 +939,11 @@ def run_source(src: Source, value: str, kind: str, keys: dict) -> dict:
     """Run one source; every failure becomes a result instead of an exception."""
     result = {"source": src.id, "name": src.name, "status": "ok",
               "verdict": "", "score": None, "fields": {}, "message": "", "link": ""}
+    # Sources without URL support can still say something about the URL's host.
+    host = None
+    if kind == "url" and kind not in src.kinds:
+        value, kind = url_host(value)
+        host = value
     if kind not in src.kinds:
         result.update(status="skipped", message=f"{src.name} only supports {describe_kinds(src.kinds)}.")
         return result
@@ -746,6 +955,8 @@ def run_source(src: Source, value: str, kind: str, keys: dict) -> dict:
         return result
     try:
         verdict, fields, score = LOOKUPS[src.id](key, value, kind)
+        if host:
+            fields = {"Checked Host": host, **fields}
         result.update(verdict=verdict, fields=fields, score=score)
     except NotFound as e:
         result.update(status="not_found", message=str(e))
@@ -767,7 +978,7 @@ def lookup(raw: str, sources: list[Source], keys: dict) -> dict:
     }
     if kind == "unknown":
         report["error"] = ("Could not identify input as a valid IPv4/IPv6 address, "
-                           "domain, or hash (MD5/SHA-1/SHA-256).")
+                           "domain, URL, or hash (MD5/SHA-1/SHA-256).")
     elif kind == "private":
         report["error"] = f"{value} is a private/reserved address; OSINT sources have no data for it."
     else:
@@ -806,6 +1017,255 @@ VERDICT_RANK = {"": 0, "info": 0, "clean": 1, "suspicious": 2, "malicious": 3}
 def worst_verdict(report: dict) -> str:
     verdicts = [r["verdict"] for r in report["results"] if r["status"] == "ok"]
     return max(verdicts, key=VERDICT_RANK.__getitem__, default="")
+
+
+# ---------------------------------------------------------------------------
+# IOC extraction from free text (logs, e-mails, reports)
+# ---------------------------------------------------------------------------
+IOC_URL_RE = re.compile(r"\b(?:https?|ftp)://[^\s\"'<>]+", re.I)
+IOC_HASH_RE = re.compile(r"\b(?:[a-f0-9]{64}|[a-f0-9]{40}|[a-f0-9]{32})\b", re.I)
+IOC_MAILBOX_RE = re.compile(r"[\w.+-]+@")
+IOC_IPV4_RE = re.compile(r"(?<![\w./-])(?:\d{1,3}\.){3}\d{1,3}(?!\.?\w)")
+IOC_IPV6_RE = re.compile(r"(?<![\w:.])(?:[a-f0-9]{0,4}:){2,7}[a-f0-9]{0,4}(?![\w:])", re.I)
+IOC_DOMAIN_RE = re.compile(
+    r"(?<![\w@.-])(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}(?![\w-])", re.I)
+DEFANGED_RE = re.compile(r"\S*(?:\[\.\]|\(\.\)|\{\.\}|\[dot\]|\(dot\))\S*")
+
+# Free text is full of dotted names that aren't domains (svchost.exe, e.g,
+# System.Net). Without a defang marker a name only counts if its ending is a
+# country code or a well-known TLD, and isn't a file extension first.
+COMMON_TLDS = frozenset("""
+    com net org info biz edu gov mil int xyz top online site club shop store live app dev cloud
+    icu vip work click link pro mobi name tech space website fun monster cyou buzz sbs cfd lol
+    quest rest bond pics life world today news blog digital agency email host hosting network
+    systems solutions services support security finance bank trade loan win bid stream download
+""".split())
+FILE_EXTENSIONS = frozenset("""
+    exe dll sys bat cmd ps1 vbs js ts py sh md rb cs go db gz ps so tmp log txt pdf doc docx
+    xls xlsx ppt pptx png jpg jpeg gif svg html htm php asp aspx jsp json xml yml yaml csv ini cfg
+    conf dat bin zip rar tar iso msi lnk eml msg java class cpp hpp
+""".split())
+
+
+def _looks_like_domain(name: str) -> bool:
+    if name not in (name.lower(), name.upper()):  # CamelCase is code, not a host
+        return False
+    tld = name.rsplit(".", 1)[-1].lower()
+    return tld not in FILE_EXTENSIONS and (len(tld) == 2 or tld in COMMON_TLDS)
+
+
+def extract_iocs(text: str) -> list[str]:
+    """Every public IP, domain, URL and hash in the text, in order of appearance."""
+    # Someone defanged it on purpose, so it needs no further proof of being a domain.
+    trusted = {m.group(0).lower() for token in DEFANGED_RE.findall(text)
+               for m in IOC_DOMAIN_RE.finditer(refang(token))}
+    found = []
+
+    def take(match: re.Match) -> str:
+        found.append((match.start(), match.group(0).rstrip(".,;:!?)]}")))
+        return " " * len(match.group(0))  # blank it so later patterns can't match inside
+
+    def take_domain(match: re.Match) -> str:
+        name = match.group(0)
+        return take(match) if name.lower() in trusted or _looks_like_domain(name) else name
+
+    text = IOC_URL_RE.sub(take, refang(text))
+    text = IOC_HASH_RE.sub(take, text)
+    text = IOC_MAILBOX_RE.sub(lambda m: " " * len(m.group(0)), text)
+    text = IOC_IPV4_RE.sub(take, text)
+    text = IOC_IPV6_RE.sub(take, text)
+    IOC_DOMAIN_RE.sub(take_domain, text)
+
+    iocs = {}
+    for _, raw in sorted(found):
+        value, kind = normalize(raw)
+        if kind in ALL_KINDS or kind == "url":
+            iocs.setdefault(value)
+    return list(iocs)
+
+
+# ---------------------------------------------------------------------------
+# BeatiRule: strip the comments from a detection rule
+# ---------------------------------------------------------------------------
+RULE_FORMATS = {"yara": "YARA", "sigma": "Sigma", "suricata": "Suricata / Snort",
+                "xml": "Wazuh / XML", "cql": "CrowdStrike CQL", "kql": "KQL"}
+RULE_DETECT = (
+    ("yara", re.compile(r"^\s*(?:(?:private|global)\s+)*rule\s+\w+[^{\n]*(?:\{|$)", re.M)),
+    ("suricata", re.compile(r"^\s*#?\s*(?:alert|drop|reject|pass|log|sdrop)\s+\S+\s+\S+\s+\S+\s+(?:->|<>)",
+                            re.M)),
+    ("sigma", re.compile(r"^(?:logsource|detection)\s*:", re.M)),
+    ("xml", re.compile(r"<(?:group|rule|var|\?xml)\b")),
+    # CQL (LogScale / Falcon): #tag filters, := assignments, or '| field != x',
+    # which KQL can't write since its pipe steps always start with an operator.
+    ("cql", re.compile(r"^\s*#\w[\w.]*\s*!?=|:=|\b(?:groupBy|cidr|coalesce)\(|\barray:\w+\("
+                       r"|^\s*\|\s*[@#\w.]+\s*(?:!?=|<|>)", re.M)),
+    ("kql",re.compile(r"^\s*\|\s*(?:where|project|extend|summarize|join|take|top)\b", re.M)),
+)
+COMMENT_MARK = "\0"  # left where a comment was, so _tidy_rule can drop lines that held nothing else
+
+
+def detect_rule_format(text: str) -> str | None:
+    return next((fmt for fmt, pattern in RULE_DETECT if pattern.search(text)), None)
+
+
+def _literal_end(text: str, start: int, quote: str, escapes: bool = True) -> int:
+    """Index just past the string or regex opened at start; literals never span lines."""
+    i = start + 1
+    while i < len(text) and text[i] != "\n":
+        if escapes and text[i] == "\\":
+            i += 2
+        elif text[i] == quote:
+            return i + 1
+        else:
+            i += 1
+    return min(i, len(text))
+
+
+def _strip_slash_comments(text: str, c_style: bool) -> tuple[str, int]:
+    """
+    '//' everywhere; c_style (YARA, CQL) adds '/* */' and /regex/ literals.
+    Strings and regexes are copied verbatim.
+    """
+    quotes = '"' if c_style else "\"'"
+    out, removed, i = [], 0, 0
+    while i < len(text):
+        ch, pair = text[i], text[i:i + 2]
+        if ch in quotes:
+            # KQL's @"C:\" is verbatim: a backslash there escapes nothing.
+            end = _literal_end(text, i, ch, escapes=text[i - 1:i] != "@")
+            out.append(text[i:end])
+            i = end
+        elif pair == "//":
+            end = text.find("\n", i)
+            i = len(text) if end < 0 else end
+            out.append(COMMENT_MARK)
+            removed += 1
+        elif c_style and pair == "/*":
+            end = text.find("*/", i + 2)
+            end = len(text) if end < 0 else end + 2
+            after = text[end:end + 1]
+            before = "".join(out[-1:])[-1:]
+            if before.isspace() and after in (" ", "\t"):
+                end += 1                     # don't leave a double space behind
+            elif before and after and not before.isspace() and not after.isspace():
+                out.append(" ")              # don't glue the neighbours together
+            out.append(COMMENT_MARK)
+            removed += 1
+            i = end
+        elif c_style and ch == "/" and re.search(r"(?:[=(,|!]|\bmatches)\s*$", "".join(out[-16:])):
+            end = _literal_end(text, i, "/")  # a regex, whatever it contains is not a comment
+            out.append(text[i:end])
+            i = end
+        else:
+            out.append(ch)
+            i += 1
+    return "".join(out), removed
+
+
+def _yaml_comment_at(line: str) -> int:
+    """Where the '#' comment on this YAML line starts, or -1."""
+    quote, prev = "", ""
+    i = 0
+    while i < len(line):
+        ch = line[i]
+        if quote:
+            if ch == "\\" and quote == '"':
+                i += 1
+            elif ch == quote:
+                quote = ""
+        elif ch in "\"'" and prev in ("", ":", "-", ",", "[", "{"):
+            quote = ch
+        elif ch == "#" and (i == 0 or line[i - 1].isspace()):
+            return i
+        if not ch.isspace():
+            prev = ch
+        i += 1
+    return -1
+
+
+def _strip_sigma_comments(text: str) -> tuple[str, int]:
+    out, removed = [], 0
+    block_indent = None  # inside a 'key: |' block scalar, where '#' is plain text
+    for line in text.split("\n"):
+        body = line.lstrip()
+        indent = len(line) - len(body)
+        if block_indent is not None:
+            if not body or indent > block_indent:
+                out.append(line)
+                continue
+            block_indent = None
+        cut = _yaml_comment_at(line)
+        if cut >= 0:
+            line = line[:cut] + COMMENT_MARK
+            removed += 1
+        if re.search(r"(?:^|[:-]\s+)[|>][-+\d]*\s*$", line.replace(COMMENT_MARK, "")):
+            block_indent = indent
+        out.append(line)
+    return "\n".join(out), removed
+
+
+def _strip_suricata_comments(text: str) -> tuple[str, int]:
+    """Only whole lines (often disabled rules) and text after the closing ')'."""
+    out, removed = [], 0
+    for line in text.split("\n"):
+        if line.lstrip().startswith("#"):
+            out.append(COMMENT_MARK)
+            removed += 1
+        else:
+            line, hits = re.subn(r"(\))\s+#[^;)\"]*$", r"\1", line)
+            out.append(line)
+            removed += hits
+    return "\n".join(out), removed
+
+
+def _strip_xml_comments(text: str) -> tuple[str, int]:
+    removed = 0
+
+    def replace(match: re.Match) -> str:
+        nonlocal removed
+        if match.group(0).startswith("<![CDATA["):
+            return match.group(0)
+        removed += 1
+        return COMMENT_MARK
+
+    return re.sub(r"<!\[CDATA\[.*?\]\]>|<!--.*?-->", replace, text, flags=re.S), removed
+
+
+RULE_STRIPPERS = {
+    "yara": lambda text: _strip_slash_comments(text, c_style=True),
+    "cql": lambda text: _strip_slash_comments(text, c_style=True),
+    "kql": lambda text: _strip_slash_comments(text, c_style=False),
+    "sigma": _strip_sigma_comments,
+    "suricata": _strip_suricata_comments,
+    "xml": _strip_xml_comments,
+}
+
+
+def _tidy_rule(text: str) -> str:
+    """Drop lines only a comment was on, trailing spaces and runs of blank lines."""
+    lines = []
+    for line in text.split("\n"):
+        had_comment = COMMENT_MARK in line
+        line = line.replace(COMMENT_MARK, "").rstrip()
+        if line or (not had_comment and lines and lines[-1]):
+            lines.append(line)
+    while lines and not lines[-1]:
+        lines.pop()
+    return "\n".join(lines)
+
+
+def beautify_rule(text: str, fmt: str = "auto") -> dict:
+    """Remove a rule's comments and nothing else: the matching logic stays as written."""
+    text = text.replace("\r\n", "\n").replace(COMMENT_MARK, "")
+    if fmt == "auto":
+        fmt = detect_rule_format(text)
+        if not fmt:
+            raise ValueError("Could not recognise the rule format. Pick it from the list.")
+    if fmt not in RULE_STRIPPERS:
+        raise ValueError(f"Unknown rule format '{fmt}'.")
+    stripped, removed = RULE_STRIPPERS[fmt](text)
+    return {"format": fmt, "format_name": RULE_FORMATS[fmt], "rule": _tidy_rule(stripped),
+            "removed": removed}
 
 
 # ---------------------------------------------------------------------------
@@ -1132,6 +1592,14 @@ def read_targets(path: str) -> list[str]:
         return [l.strip() for l in f if l.strip() and not l.lstrip().startswith("#")]
 
 
+def read_text(path: str) -> str:
+    """A file's text, or stdin for '-'. Logs aren't always clean UTF-8."""
+    if path == "-":
+        return sys.stdin.read()
+    with open(path, encoding="utf-8-sig", errors="replace") as f:
+        return f.read()
+
+
 def parse_args(argv=None):
     p = argparse.ArgumentParser(
         prog="leopard",
@@ -1144,6 +1612,8 @@ def parse_args(argv=None):
             "  leopard 1.2.3[.]4 -s vt,abuseipdb     only some sources\n"
             "  leopard -f iocs.txt -o report.csv     bulk lookup, save as CSV\n"
             "  leopard -f iocs.txt --delay 15        respect free VirusTotal limits (4/min)\n"
+            "  leopard -x incident.txt               find the IOCs in free text, look them up\n"
+            "  leopard -x mail.eml --dry-run         only list the IOCs found, no lookups\n"
             "  leopard --keys                        add or change API keys\n"
             "  leopard --gui                         open the browser interface\n"
             "  leopard --name \"Your Name\"            set the name shown in the banner and GUI\n"
@@ -1154,6 +1624,10 @@ def parse_args(argv=None):
     )
     p.add_argument("targets", nargs="*", help="IPs, domains or hashes (defanged input is OK)")
     p.add_argument("-f", "--file", help="read targets from a file, one per line ('#' starts a comment)")
+    p.add_argument("-x", "--extract", metavar="FILE",
+                   help="find IOCs in free text (log, e-mail, report) and look them up; '-' = stdin")
+    p.add_argument("--dry-run", action="store_true",
+                   help="with --extract: print the IOCs found, one per line, without looking them up")
     p.add_argument("-s", "--sources", default="all",
                    help="comma-separated source ids or 'all' (default: all)")
     p.add_argument("-o", "--output", help="save results to a .json or .csv file")
@@ -1176,6 +1650,8 @@ def parse_args(argv=None):
         p.error(check_output_path(args.output))
     if args.delay < 0:
         p.error("--delay must be 0 or more")
+    if args.dry_run and not args.extract:
+        p.error("--dry-run needs --extract")
     try:
         args.sources = parse_sources(args.sources)
     except ValueError as e:
@@ -1197,7 +1673,8 @@ def main(argv=None) -> int:
             print(f"{C.RED}[!] Could not save the name: {e.strerror}{C.RESET}")
             return 1
         print(f"{C.GREEN}[+] Display name set to '{args.name.strip()}' ({path}).{C.RESET}")
-        if not (args.targets or args.file or args.gui or args.keys or args.list_sources):
+        if not (args.targets or args.file or args.extract or args.gui or args.keys
+                or args.list_sources):
             return 0
 
     keys, env_path = load_api_keys()
@@ -1228,6 +1705,20 @@ def main(argv=None) -> int:
         if not targets:
             print(f"{C.YELLOW}[!] {args.file} has no targets.{C.RESET}")
             return 1
+    if args.extract:
+        try:
+            iocs = extract_iocs(read_text(args.extract))
+        except OSError as e:
+            print(f"{C.RED}[!] Could not read {args.extract}: {e.strerror}{C.RESET}")
+            return 1
+        if not iocs:
+            print(f"{C.YELLOW}[!] No IOCs found in {args.extract}.{C.RESET}")
+            return 1
+        if args.dry_run:
+            print("\n".join(iocs))
+            return 0
+        print(f"{C.CYAN}[*] Found {len(iocs)} IOC(s) in {args.extract}{C.RESET}\n")
+        targets += iocs
     targets = list(dict.fromkeys(targets))  # drop duplicates, keep order
 
     if targets:

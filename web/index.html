@@ -17,10 +17,16 @@
         <p>OSINT multi-source lookup</p>
       </div>
     </div>
+    <nav class="tabs" role="tablist" aria-label="Tools">
+      <button type="button" class="tab" role="tab" id="tabLookup" data-view="viewLookup"
+        aria-controls="viewLookup" aria-selected="true">Lookup</button>
+      <button type="button" class="tab" role="tab" id="tabRule" data-view="viewRule"
+        aria-controls="viewRule" aria-selected="false">BeatiRule</button>
+    </nav>
     <button type="button" id="openKeys" class="ghost">Settings</button>
   </header>
 
-  <main>
+  <main id="viewLookup" role="tabpanel" aria-labelledby="tabLookup">
     <section class="panel query">
       <div class="field-head">
         <label for="targets">Targets</label>
@@ -32,6 +38,7 @@
         <label class="file-btn">Load from .txt
           <input type="file" id="fileInput" accept=".txt,.csv,text/plain" hidden>
         </label>
+        <button type="button" id="extract" title="Replace the text above with the IPs, domains, URLs and hashes found in it">Extract IOCs</button>
         <span class="muted" id="targetCount">0 targets</span>
         <span class="spacer"></span>
         <span class="muted hint">Ctrl + Enter to analyze</span>
@@ -71,6 +78,46 @@
     </section>
 
     <section id="results" class="results"></section>
+  </main>
+
+  <main id="viewRule" role="tabpanel" aria-labelledby="tabRule" hidden>
+    <section class="panel query">
+      <div class="field-head">
+        <label for="ruleInput">Rule</label>
+        <span class="muted">Paste or drop a rule &middot; comments go, the rule itself stays exactly as written</span>
+      </div>
+      <textarea id="ruleInput" rows="12" spellcheck="false" autocomplete="off"
+        placeholder="rule example {&#10;  // this comment will be removed&#10;  condition: true&#10;}"></textarea>
+      <div class="row">
+        <label class="file-btn">Load file
+          <input type="file" id="ruleFile" hidden>
+        </label>
+        <label class="delay" for="ruleFormat">Format
+          <select id="ruleFormat">
+            <option value="auto">Auto-detect</option>
+            <option value="yara">YARA</option>
+            <option value="sigma">Sigma</option>
+            <option value="suricata">Suricata / Snort</option>
+            <option value="xml">Wazuh / XML</option>
+            <option value="cql">CrowdStrike CQL</option>
+            <option value="kql">KQL</option>
+          </select>
+        </label>
+        <span class="spacer"></span>
+        <button type="button" id="ruleClear" class="ghost">Clear</button>
+      </div>
+      <p id="ruleError" class="error-text rule-error" role="alert" hidden></p>
+    </section>
+
+    <section id="ruleResult" class="panel" hidden>
+      <div class="row rule-head">
+        <h2>Clean rule</h2>
+        <span id="ruleMeta" class="muted"></span>
+        <span class="spacer"></span>
+        <button type="button" id="ruleCopy" class="primary">Copy</button>
+      </div>
+      <pre id="ruleOutput" class="rule-output" tabindex="0"></pre>
+    </section>
   </main>
 
   <dialog id="keysDialog">

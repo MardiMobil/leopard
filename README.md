@@ -1,11 +1,13 @@
 # leopard
 
-Check an IP address, domain or file hash against several threat-intelligence sources at once.
+Check an IP address, domain, URL or file hash against several threat-intelligence sources at once.
 You get each source's verdict plus one **0–100% malicious score**.
 
 - **Two interfaces:** terminal (`leopard`) and browser GUI (`leopard --gui`). Both run the same code, so results are identical.
 - Runs on **Windows and Linux**.
 - Bulk lookups, CSV/JSON export, defanged input (`1.2.3[.]4`, `hxxp://evil[.]com`) and IPv6.
+- **IOC extraction:** paste a log, e-mail or report and the tool finds the indicators in it.
+- **BeatiRule** (GUI tab): strips the comments from YARA, Sigma, Suricata/Snort, Wazuh, CrowdStrike CQL and KQL rules.
 - Personal: the banner, prompt and GUI header show **your own name** (see [Your display name](#your-display-name)).
 
 ---
@@ -29,15 +31,25 @@ You get each source's verdict plus one **0–100% malicious score**.
 
 | # | Source | id | Key | Checks |
 |---|--------|----|-----|--------|
-| 1 | VirusTotal | `vt` | required | IP, domain, hash |
+| 1 | VirusTotal | `vt` | required | IP, domain, URL, hash |
 | 2 | AbuseIPDB | `abuseipdb` | required | IP |
 | 3 | AlienVault OTX | `otx` | optional (works without one) | IP, domain, hash |
-| 4 | URLhaus (abuse.ch) | `urlhaus` | required | IPv4, domain, MD5/SHA-256 |
+| 4 | URLhaus (abuse.ch) | `urlhaus` | abuse.ch key | IPv4, domain, URL, MD5/SHA-256 |
 | 5 | Shodan InternetDB | `shodan` | not needed | IPv4 |
 | 6 | bgp.he.net | `bgp` | not needed | IP, domain |
+| 7 | ThreatFox (abuse.ch) | `threatfox` | abuse.ch key | IPv4, domain, URL, hash |
+| 8 | MalwareBazaar (abuse.ch) | `bazaar` | abuse.ch key | hash |
+| 9 | RDAP | `rdap` | not needed | domain (registration date, registrar) |
 
 A source without a key is **skipped**; the others still run.
-So you can use OTX, Shodan and bgp.he.net without any keys at all.
+So you can use OTX, Shodan, bgp.he.net and RDAP without any keys at all.
+URLhaus, ThreatFox and MalwareBazaar all use the same abuse.ch key, so you only enter it once.
+
+**URLs:** a URL with a path or query (`http://evil.com/gate.php`) is checked as a URL by VirusTotal,
+URLhaus and ThreatFox. The other sources check its host, and their cards show it as **Checked Host**.
+`http://evil.com/` has nothing beyond the host, so it is treated as the domain `evil.com`.
+A URL VirusTotal has never seen shows as not found: leopard only reads existing reports
+and never submits a URL, because submissions are visible to other VirusTotal users.
 
 ---
 
@@ -103,7 +115,7 @@ In this mode keys are read from a `.env` file next to `leopard.py`.
 | VirusTotal | [virustotal.com](https://www.virustotal.com/gui/join-us) → sign up → profile → **API Key** |
 | AbuseIPDB | [abuseipdb.com/register](https://www.abuseipdb.com/register) → **Account** → **API** |
 | AlienVault OTX | [otx.alienvault.com](https://otx.alienvault.com/) → **Settings** → **OTX Key** |
-| URLhaus | [auth.abuse.ch](https://auth.abuse.ch/) → sign in → **Auth-Key** |
+| abuse.ch (URLhaus, ThreatFox, MalwareBazaar) | [auth.abuse.ch](https://auth.abuse.ch/) → sign in → **Auth-Key** |
 
 ### 4 ways to add a key
 
@@ -161,6 +173,7 @@ Press **Ctrl+C** in the terminal to stop it.
 
 **Step by step:**
 1. In **Targets**, enter one target per line, or use **Load from .txt**.
+   Have a log, e-mail or report instead? Paste it and click **Extract IOCs**: the text is replaced by the indicators found in it.
 2. Tick the sources you want under **Sources** (your choice is remembered).
 3. Click **Analyze** (or press **Ctrl+Enter**).
 4. Each target gets a card:
@@ -172,6 +185,24 @@ Press **Ctrl+C** in the terminal to stop it.
 
 A free VirusTotal key allows 4 requests per minute. For many targets, set
 **Delay between targets** to `15`.
+
+### BeatiRule tab
+
+Paste a rule, drop a file on the box or use **Load file**. The clean rule appears right away; **Copy** puts it on the clipboard.
+
+| Format | What is removed |
+|--------|-----------------|
+| YARA | `//` and `/* */` |
+| Sigma | `#` comments |
+| Suricata / Snort | `#` lines (including disabled rules) and notes after the closing `)` |
+| Wazuh / XML | `<!-- -->` |
+| CrowdStrike CQL (LogScale, Falcon) | `//` and `/* */` (`#repo=...` tag filters are not comments and stay) |
+| KQL | `//` |
+
+The format is detected automatically; if it can't be, pick it from the **Format** list.
+Only comments go: text inside strings, regexes, Sigma `|` blocks and XML `CDATA` is left alone,
+even when it looks like a comment (`"http://..."`, `/a\/\/b/`). YARA `meta:` and Sigma fields such as
+`description:` are part of the rule, so they stay.
 
 ---
 
@@ -196,6 +227,9 @@ leopard
 | Defanged input | `leopard "hxxp://evil[.]com/login"` |
 | Only some sources | `leopard 1.1.1.1 -s vt,abuseipdb` (or by number: `-s 1,2`) |
 | Bulk lookup from a file | `leopard -f iocs.txt` |
+| Find and check the IOCs in free text | `leopard -x incident.txt` |
+| Only list the IOCs in free text | `leopard -x mail.eml --dry-run` |
+| Extract from a pipe | `type alert.log \| leopard -x -` (Linux: `cat`) |
 | Save results for Excel | `leopard -f iocs.txt -o report.csv` |
 | Save results as JSON | `leopard -f iocs.txt -o report.json` |
 | Respect VirusTotal limits | `leopard -f iocs.txt --delay 15` |
@@ -210,6 +244,11 @@ evil-domain.com
 44d88612fea8a8f36de82e1278abb02f
 ```
 At the end you get a summary table with every target's score.
+
+**Free text** (`-x`): public IPs, URLs, hashes and domains are found in any text, defanged or not, and
+duplicates are dropped. Private IPs are left out, and so are dotted names that are clearly not domains
+(`svchost.exe`, `System.Net`). Plain text ending in an unusual TLD can be missed, but defanged names
+(`evil[.]zip`) always count. Use `--dry-run` first to see the list without spending API quota.
 
 Every source result ends with a `Link :` line pointing to that indicator on the source's own website
 (in Windows Terminal, **Ctrl+click** opens it). The link is shown even when a source was skipped
@@ -248,11 +287,15 @@ Antivirus engines flag it as malicious, so it's a safe way to see a high score.
 | VirusTotal | by number of malicious engines: 1 → 22, 3 → 53, 5 → 71, 10 → 92 (suspicious counts half) |
 | AbuseIPDB | its abuse confidence score |
 | URLhaus | active malware URL or known hash → 100, only past URLs → 60 |
+| ThreatFox | the highest confidence level of the matching IOCs |
+| MalwareBazaar | known sample → 100 |
 | OTX | 50 if pulses name a malware family, otherwise 0 |
 | Shodan | compromised/malware/c2/botnet tag → 60, tor → 30, otherwise 0 |
+| RDAP | domain younger than 30 days → 50, younger than 90 days → 25, otherwise 0 |
 | bgp.he.net | not scored (routing data only) |
 
-The scores are then combined by trust weight (VT 1.0, AbuseIPDB 0.9, URLhaus 0.9, Shodan 0.5, OTX 0.4)
+The scores are then combined by trust weight (VT 1.0, AbuseIPDB 0.9, URLhaus 0.9, ThreatFox 0.9,
+MalwareBazaar 0.9, Shodan 0.5, OTX 0.4, RDAP 0.4)
 as independent evidence: `score = 1 − Π(1 − weight × source_score)`.
 One strong source is enough for a high score, and agreeing sources push it higher.
 
@@ -323,7 +366,9 @@ sudo rm -rf /usr/local/lib/leopard /usr/local/bin/leopard /etc/leopard
 leopard [targets ...] [options]
 
   -f, --file FILE       read targets from a file
-  -s, --sources LIST    sources: vt,abuseipdb,otx,urlhaus,shodan,bgp or all (default)
+  -x, --extract FILE    find IOCs in free text and look them up ('-' = stdin)
+  --dry-run             with --extract: only print the IOCs found
+  -s, --sources LIST    sources: vt,abuseipdb,otx,urlhaus,shodan,bgp,threatfox,bazaar,rdap or all (default)
   -o, --output FILE     write results to a .json or .csv file
   --delay SEC           seconds to wait between targets
   --list-sources        show sources and API key status

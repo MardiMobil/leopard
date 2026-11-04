@@ -6,7 +6,7 @@
 const TOKEN = document.querySelector('meta[name="api-token"]').content;
 const $ = (sel) => document.querySelector(sel);
 
-const TYPE_LABEL = { ipv4: 'IPv4', ipv6: 'IPv6', domain: 'Domain', hash: 'Hash',
+const TYPE_LABEL = { ipv4: 'IPv4', ipv6: 'IPv6', domain: 'Domain', url: 'URL', hash: 'Hash',
   private: 'Private IP', unknown: 'Unknown' };
 const VERDICT_LABEL = { malicious: 'MALICIOUS', suspicious: 'SUSPICIOUS', clean: 'CLEAN', info: 'INFO' };
 const STATUS_LABEL = { skipped: 'SKIPPED', error: 'ERROR', not_found: 'NO DATA' };
@@ -14,6 +14,7 @@ const VERDICT_RANK = { '': 0, info: 0, clean: 1, suspicious: 2, malicious: 3 };
 const STATE_TEXT = { ok: 'key OK', none: 'no key needed', optional: 'works without key',
   missing: 'no key, will be skipped' };
 const SELECTION_KEY = 'mardimobil.sources';
+const TAB_KEY = 'leopard.tab';
 
 let sources = [];
 let reports = [];
@@ -109,6 +110,21 @@ function parseTargets() {
 function updateCount() {
   const n = parseTargets().length;
   $('#targetCount').textContent = `${n} target${n === 1 ? '' : 's'}`;
+}
+
+// Replaces pasted free text (log, e-mail, report) with the indicators found in it.
+async function extractIocs() {
+  const area = $('#targets');
+  if (!area.value.trim()) return notify('Paste some text first.', true);
+  try {
+    const { iocs } = await (await api('/api/extract', { text: area.value })).json();
+    if (!iocs.length) return notify('No IOCs found in this text.', true);
+    area.value = iocs.join('\n');
+    updateCount();
+    notify(`Found ${iocs.length} IOC${iocs.length === 1 ? '' : 's'}.`);
+  } catch (e) {
+    notify(`Extract failed: ${e.message}`, true);
+  }
 }
 
 /* -------------------------------------------------------------------- run */
@@ -342,10 +358,10 @@ async function openKeys() {
   } catch (e) {
     return notify(e.message, true);
   }
-  const fields = sources.filter((s) => s.key_env).map((s) => {
+  const fields = sources.filter((s) => s.key_row).map((s) => {
     const row = el('label', 'key-row');
     const info = el('div', 'key-info');
-    info.append(el('strong', null, s.name), el('code', null, s.key_env),
+    info.append(el('strong', null, s.key_name), el('code', null, s.key_env),
       el('span', `key-state ${s.state}`, s.state === 'ok' ? `current: ${s.masked}`
         : s.state === 'optional' ? 'not set (optional)' : 'not set'));
     const input = el('input');
@@ -381,7 +397,7 @@ async function saveKeys(event) {
     await loadSources(result.saved);
     saveSelection();
     const parts = [];
-    if (result.saved.length) parts.push(`${result.saved.length} key${result.saved.length === 1 ? '' : 's'}`);
+    if (result.key_count) parts.push(`${result.key_count} key${result.key_count === 1 ? '' : 's'}`);
     if (nameChanged) parts.push('display name');
     notify(`Saved ${parts.join(' and ')}.`);
   } catch (e) {
@@ -389,8 +405,100 @@ async function saveKeys(event) {
   }
 }
 
+/* -------------------------------------------------------------- BeatiRule */
+
+let ruleTimer;
+let ruleRequest = 0;
+
+function showRuleError(message) {
+  $('#ruleError').textContent = message;
+  $('#ruleError').hidden = !message;
+}
+
+async function beautifyRule() {
+  const text = $('#ruleInput').value;
+  const request = ++ruleRequest;
+  if (!text.trim()) {
+    showRuleError('');
+    $('#ruleResult').hidden = true;
+    return;
+  }
+  try {
+    const result = await (await api('/api/beautirule', { text, format: $('#ruleFormat').value })).json();
+    if (request !== ruleRequest) return; // the text changed while this one was running
+    showRuleError('');
+    $('#ruleOutput').textContent = result.rule;
+    $('#ruleMeta').textContent = `${result.format_name} · ${result.removed} comment${result.removed === 1 ? '' : 's'} removed`;
+    $('#ruleResult').hidden = false;
+  } catch (e) {
+    if (request !== ruleRequest) return;
+    $('#ruleResult').hidden = true;
+    showRuleError(e.message);
+  }
+}
+
+function queueBeautify() {
+  clearTimeout(ruleTimer);
+  ruleTimer = setTimeout(beautifyRule, 200);
+}
+
+async function loadRuleFile(file) {
+  if (!file) return;
+  $('#ruleInput').value = await file.text();
+  beautifyRule();
+}
+
+async function copyRule() {
+  const output = $('#ruleOutput');
+  try {
+    await navigator.clipboard.writeText(output.textContent);
+    return notify('Rule copied.');
+  } catch (_) { /* blocked by browser policy: fall back to copying a selection */ }
+  getSelection().selectAllChildren(output);
+  if (document.execCommand('copy')) notify('Rule copied.');
+  else notify('Could not copy. The rule is selected: press Ctrl+C.', true);
+}
+
+/* ------------------------------------------------------------------- tabs */
+
+function showTab(tab) {
+  for (const t of document.querySelectorAll('.tab')) {
+    const active = t === tab;
+    t.setAttribute('aria-selected', String(active));
+    document.getElementById(t.dataset.view).hidden = !active;
+  }
+  try { localStorage.setItem(TAB_KEY, tab.id); } catch (_) { /* private mode */ }
+}
+
+function restoreTab() {
+  let saved = null;
+  try { saved = localStorage.getItem(TAB_KEY); } catch (_) { /* private mode */ }
+  const tab = saved && document.getElementById(saved);
+  if (tab && tab.classList.contains('tab')) showTab(tab);
+}
+
 /* ------------------------------------------------------------------- init */
 
+document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => showTab(t)));
+$('#ruleInput').addEventListener('input', queueBeautify);
+$('#ruleInput').addEventListener('dragover', (e) => e.preventDefault());
+$('#ruleInput').addEventListener('drop', (e) => {
+  const file = e.dataTransfer.files[0];
+  if (!file) return; // dropped text: the browser inserts it and fires 'input'
+  e.preventDefault();
+  loadRuleFile(file);
+});
+$('#ruleFormat').addEventListener('change', beautifyRule);
+$('#ruleFile').addEventListener('change', async (e) => {
+  await loadRuleFile(e.target.files[0]);
+  e.target.value = '';
+});
+$('#ruleCopy').addEventListener('click', copyRule);
+$('#ruleClear').addEventListener('click', () => {
+  $('#ruleInput').value = '';
+  beautifyRule();
+});
+$('#extract').addEventListener('click', extractIocs);
 $('#targets').addEventListener('input', updateCount);
 $('#targets').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); run(); }
@@ -419,3 +527,4 @@ $('#cancelKeys').addEventListener('click', () => $('#keysDialog').close());
 
 loadSources().catch((e) => notify(`Could not load sources: ${e.message}`, true));
 updateCount();
+restoreTab();

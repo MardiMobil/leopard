@@ -140,6 +140,8 @@ def make_handler(token: str, port: int):
                         "name": s.name,
                         "kinds": core.describe_kinds(s.kinds),
                         "key_env": s.key_env,
+                        "key_name": core.key_name(s) if s.key_env else "",
+                        "key_row": s in core.KEYED_SOURCES,
                         "state": source_state(s, keys),
                         "masked": core._mask(keys[s.id]) if s.id in keys else "",
                     } for s in core.SOURCES],
@@ -162,7 +164,18 @@ def make_handler(token: str, port: int):
                 return self._save_keys(body)
             if path == "/api/export":
                 return self._export(body)
+            if path == "/api/extract":
+                return self._json(200, {"iocs": core.extract_iocs(str(body.get("text", "")))})
+            if path == "/api/beautirule":
+                return self._beautify(body)
             return self._error(404, "Not found.")
+
+        def _beautify(self, body: dict):
+            try:
+                return self._json(200, core.beautify_rule(str(body.get("text", "")),
+                                                          str(body.get("format", "auto"))))
+            except ValueError as e:
+                return self._error(400, str(e))
 
         def _lookup(self, body: dict):
             target = str(body.get("target", "")).strip()[:2048]
@@ -208,7 +221,10 @@ def make_handler(token: str, port: int):
                     core.set_env_value(path, core.NAME_ENV, name)
             except OSError as e:
                 return self._error(500, f"Could not write {path}: {e.strerror}")
-            return self._json(200, {"saved": [src.id for src, _ in pending],
+            # A shared key switches on every source that uses it.
+            envs = {src.key_env for src, _ in pending}
+            return self._json(200, {"saved": [s.id for s in core.SOURCES if s.key_env in envs],
+                                    "key_count": len(pending),
                                     "user_name": core.load_display_name(), "env_path": path})
 
         def _export(self, body: dict):
